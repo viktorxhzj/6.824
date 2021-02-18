@@ -13,7 +13,7 @@ var (
 	INFO          = "[Debug] "
 	ERROR         = "[Error] "
 	enableDebug   = 1
-	enableConsole = 0
+	enableConsole = 1
 	enableFile    = 1
 )
 

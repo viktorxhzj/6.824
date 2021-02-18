@@ -164,10 +164,9 @@ func (rf *Raft) leaderLoop() {
 	rf.mu.Lock()
 
 	// reinitialize volatile status after election
-	// nextIndex[]: initialize to last logger index + 1
-	// matchIndex[]: initialize to 0
-	entry, _ := rf.lastLogInfo()
 
+	// 空日志返回索引0
+	entry, _ := rf.lastLogInfo()
 	lastLogIndex := entry.Index
 
 	// 当选时，自动填充一个空 LogEntry
@@ -178,7 +177,10 @@ func (rf *Raft) leaderLoop() {
 	// })
 
 	for i := 0; i < len(rf.peers); i++ {
+		// nextIndex[]: initialize to leader last logger index + 1
 		rf.nextIndex[i] = lastLogIndex + 1
+
+		// matchIndex[]: initialize to 0
 		rf.matchIndex[i] = 0
 	}
 
@@ -200,7 +202,7 @@ func (rf *Raft) leaderLoop() {
 
 			var entries []LogEntry
 			prevLogIndex := rf.matchIndex[i] // index of logger entry immediately preceding new ones
-			prevLogTerm := None
+			var prevLogTerm int
 
 			//    |
 			// [5 6 7 8 9]
@@ -208,7 +210,7 @@ func (rf *Raft) leaderLoop() {
 			// [1]
 
 			// 全量拷贝
-			if prevLogIndex == LogIndexZero {
+			if prevLogIndex == 0 {
 				entries = rf.logs
 			} else {
 				s := rf.logs[0].Index
@@ -269,14 +271,26 @@ func (rf *Raft) replicateLoop() {
 			if rf.logs[len(rf.logs)-1].Index >= rf.nextIndex[i] {
 
 				prevLogIndex := rf.nextIndex[i] - 1
-				sliceIndex := rf.sliceIndex(prevLogIndex)
+				var prevLogTerm int
+				var entries []LogEntry
+				if prevLogIndex == 0 {
+					entries = rf.logs
+				} else {
+					s := rf.logs[0].Index
+					idx := prevLogIndex - s
+					if idx >= len(rf.logs) {
+						entries = make([]LogEntry, 0)
+					} else {
+						entries = rf.logs[idx+1:]
+					}
+				}
 
 				request := AppendEntriesRequest{
 					LeaderTerm:        rf.currentTerm,
 					LeaderId:          rf.me,
-					PrevLogIndex:      rf.matchIndex[i],
-					PrevLogTerm:       rf.logs[sliceIndex].Term,
-					Entries:           rf.logs[sliceIndex+1:],
+					PrevLogIndex:      prevLogIndex,
+					PrevLogTerm:       prevLogTerm,
+					Entries:           entries,
 					LeaderCommitIndex: rf.commitIndex,
 				}
 
