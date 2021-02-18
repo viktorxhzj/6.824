@@ -79,9 +79,9 @@ func (rf *Raft) followerLoop() {
 		rf.mu.Lock()
 
 		// set a new Trigger and kick off
-		timeout := TimerBase*time.Millisecond + time.Duration(rand.Intn(TimerRange))*time.Millisecond
+		timeout := (TimerBase + time.Duration(rand.Intn(TimerRange))) * time.Millisecond
 		rf.trigger = NewTrigger()
-		logger.Debug(rf.me, "reset timer=%+v", timeout)
+		logger.Debug(rf.me, "reset timer=%+v, startTime=%+v", timeout, rf.trigger.StartTime)
 		go rf.elapseTrigger(timeout, rf.trigger.StartTime)
 
 		rf.mu.Unlock()
@@ -95,12 +95,10 @@ func (rf *Raft) followerLoop() {
 		case rf.trigger.Elapsed: // timer naturally elapses, turns to Candidate
 			logger.Debug(rf.me, "Follower turns to Candidate, timeout=%+v", timeout)
 			rf.role = Candidate
-			rf.trigger = nil
 			rf.mu.Unlock()
 			return
 		default: // stays as Follower, set a new Trigger in the next round
 			rf.role = Follower
-			rf.trigger = nil
 		}
 		rf.mu.Unlock()
 		/*-----------------------------------------*/
@@ -147,7 +145,6 @@ func (rf *Raft) candidateLoop() {
 		/*-----------------------------------------*/
 
 		rf.trigger.Wait()
-		rf.trigger = nil
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		// 进入下一次循环前判断是否角色产生变化
@@ -348,7 +345,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 
 }
-
 
 // sendRequestVote 发送RPC请求，并处理RPC返回
 // 该函数为异步调用

@@ -13,6 +13,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applyChan = applyCh
+	rf.logs = make([]LogEntry, 0)
+	rf.nextIndex = make([]int, len(peers))
+	rf.matchIndex = make([]int, len(peers))
+	rf.appendChan = make(chan int)
 
 	// Your initialization code here (2A, 2B, 2C).
 
@@ -110,7 +114,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 		return
 	}
 
-	lastLogIndex, lastLogTerm := rf.lastLogInfo()
+	lastEntry, _ := rf.lastLogInfo()
 
 	// If RPC request or response contains term T > currentTerm:
 	// set currentTerm = T, convert to follower (§5.1)
@@ -130,7 +134,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	}
 
 	// if logger is not up-to-date, reject
-	if lastLogTerm > req.LastLogTerm || (lastLogTerm == req.LastLogTerm && lastLogIndex > req.LastLogIndex) {
+	if lastEntry.Term > req.LastLogTerm || (lastEntry.Term == req.LastLogTerm && lastEntry.Index > req.LastLogIndex) {
 		logger.Debug(rf.me, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
 
 		resp.Info = Rejected

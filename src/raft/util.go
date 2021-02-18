@@ -1,12 +1,13 @@
 package raft
 
 import (
-	"time"
-	"sync/atomic"
 	"6.824/logger"
+	"sync/atomic"
+	"time"
 )
 
 type Trigger struct {
+	On        bool
 	C         chan int
 	StartTime int64
 	Elapsed   bool
@@ -14,8 +15,9 @@ type Trigger struct {
 
 func NewTrigger() *Trigger {
 	t := &Trigger{}
-	t.StartTime = time.Now().Unix()
+	t.StartTime = time.Now().UnixNano()
 	t.C = make(chan int)
+	t.On = true
 	return t
 }
 
@@ -25,22 +27,23 @@ func (t *Trigger) Wait() {
 
 func (t *Trigger) Elapse() {
 	t.Elapsed = true
+	t.On = false
 	close(t.C)
 }
 
 func (t *Trigger) Close() {
+	t.On = false
 	close(t.C)
 }
 
 // Trigger naturally elapses
 func (rf *Raft) elapseTrigger(d time.Duration, st int64) {
 	time.Sleep(d)
-
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// 当且仅当st时刻触发的定时器还在时，使之过期
-	if rf.trigger != nil && rf.trigger.StartTime == st {
+	if rf.trigger.On && rf.trigger.StartTime == st {
 		rf.trigger.Elapse()
 	}
 	/*-----------------------------------------*/
@@ -49,7 +52,7 @@ func (rf *Raft) elapseTrigger(d time.Duration, st int64) {
 // close the Trigger in advance
 // caller is within a critical section, no need to lock
 func (rf *Raft) closeTrigger(st int64) {
-	if rf.trigger != nil && rf.trigger.StartTime == st {
+	if rf.trigger.On && rf.trigger.StartTime == st {
 		rf.trigger.Close()
 	}
 }
@@ -57,7 +60,7 @@ func (rf *Raft) closeTrigger(st int64) {
 // reset the Trigger
 // caller is within a critical section, no need to lock
 func (rf *Raft) resetTrigger() {
-	if rf.trigger != nil {
+	if rf.trigger.On {
 		rf.trigger.Close()
 	}
 }
