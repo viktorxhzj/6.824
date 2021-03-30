@@ -2,21 +2,22 @@ package raft
 
 import (
 	"6.824/labrpc"
-	"6.824/logger"
 )
 
 // Make creates a pointer to a Raft Node.
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
-	rf.applyChan = applyCh
-	rf.logs = make([]LogEntry, 0)
-	rf.nextIndex = make([]int, len(peers))
-	rf.matchIndex = make([]int, len(peers))
-	rf.appendChan = make(chan int)
+	rf := &Raft{
+		peers: peers,
+		persister: persister,
+		me: me,
+		size: len(peers),
+		applyChan: applyCh,
+		logs: make([]LogEntry, 0),
+		nextIndex: make([]int, len(peers)),
+		matchIndex: make([]int, len(peers)),
+		appendChan: make(chan int),
+	}
 
 	// Your initialization code here (2A, 2B, 2C).
 
@@ -55,13 +56,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	index := None
-	term := None
+	index, term := -1, -1
 	var isLeader bool
 
 	switch rf.role {
 	case Leader:
-		logger.Debug(rf.me, "### LEADER RECEIVES COMMAND ###")
+		Debug(rf, "### LEADER RECEIVES COMMAND ###")
 
 		index = 1
 		if len(rf.logs) > 0 {
@@ -79,7 +79,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		})
 		//rf.persist()
 
-		logger.Debug(rf.me, "Log after local append:%+v", rf.logs)
+		Debug(rf, "Log after local append:%+v", rf.logs)
 		rf.matchIndex[rf.me] = index
 		rf.nextIndex[rf.me] = index + 1
 
@@ -89,25 +89,26 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		}()
 
 	default:
-		logger.Debug(rf.me, "### FOLLOWER/CANDIDATE RECEIVES COMMAND ###")
+		Debug(rf, "### FOLLOWER/CANDIDATE RECEIVES COMMAND ###")
 	}
 	return index, term, isLeader
 	/*-----------------------------------------*/
 }
 
 // RequestVoteHandler is the RPC handler for RequestVote
+// Candidate to Follower/Candidate/Stale Leader
 func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteResponse) {
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
 
-	logger.Debug(rf.me, "VoteRequest from %d, myTerm=%d, itsTerm=%d", req.CandidateId, rf.currentTerm, req.CandidateTerm)
+	Debug(rf, "VoteRequest from %d, myTerm=%d, itsTerm=%d", req.CandidateId, rf.currentTerm, req.CandidateTerm)
 
 	resp.ResponseTerm = rf.currentTerm
 
 	// 1. Reply false if term < currentTerm (§5.1)
 	if req.CandidateTerm < rf.currentTerm {
-		logger.Debug(rf.me, "reject VoteRequest from %d, my term is newer", req.CandidateId)
+		Debug(rf, "reject VoteRequest from %d, my term is newer", req.CandidateId)
 
 		resp.Info = TermOutdated
 		rf.mu.Unlock()
@@ -126,7 +127,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 
 	// if already voted, reject
 	if rf.votedFor != NoVote && rf.votedFor != req.CandidateId {
-		logger.Debug(rf.me, "reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
+		Debug(rf, "reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
 
 		resp.Info = Rejected
 		rf.mu.Unlock()
@@ -135,7 +136,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 
 	// if logger is not up-to-date, reject
 	if lastEntry.Term > req.LastLogTerm || (lastEntry.Term == req.LastLogTerm && lastEntry.Index > req.LastLogIndex) {
-		logger.Debug(rf.me, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
+		Debug(rf, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
 
 		resp.Info = Rejected
 		rf.mu.Unlock()
@@ -143,7 +144,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	}
 
 	// if votedFor is null or candidateId, and candidate's logger is at least as up-to-date as receiver's logger, grant vote
-	logger.Debug(rf.me, "vote for %d, our Term=%d", req.CandidateId, req.CandidateTerm)
+	Debug(rf, "vote for %d, our Term=%d", req.CandidateId, req.CandidateTerm)
 	rf.votedFor = req.CandidateId
 
 	resp.Info = Granted
@@ -153,13 +154,14 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 }
 
 // AppendEntriesHandler is the RPC handler for AppendEntries
+// Leader -> Follower/Candidate/Stale Leader
 func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
 	defer rf.printLog()
 
-	logger.Debug(rf.me, "\nAppendEntries from %d\nTerm\t%d|%d\n", req.LeaderId, rf.currentTerm, req.LeaderTerm)
+	Debug(rf, "\nAppendEntries from Leader\n%+v", *req)
 
 	resp.ResponseTerm = rf.currentTerm
 
@@ -180,19 +182,28 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		rf.role = Follower
 	}
 
-	sliceIndex := rf.sliceIndex(req.PrevLogIndex)
+	sliceIndex := -1
+
+	if req.PrevLogIndex != 0 {
+		sliceIndex = rf.sliceIndex(req.PrevLogIndex)
+
+	}
 
 	switch sliceIndex {
 
-	case SliceIndexNotFound:
-		// if a follower does not have prevLogIndex in its logs
+	case -2:
+		// if you get an AppendEntries RPC with a prevLogIndex 
+		// that points beyond the end of your log, 
+		// you should handle it the same as if you did have that entry 
+		// but the term did not match (i.e., reply false).
 		resp.Info = LogInconsistent
 		resp.ConflictIndex = len(rf.logs)
-		resp.ConflictTerm = None
+		resp.ConflictTerm = -1
 		rf.mu.Unlock()
 		return
 
-	case SliceIndexStart:
+	case -1:
+		// entirely different from the beginning
 
 	default:
 		// 2. Reply false if logger doesn't contain an entry at prevLogIndex

@@ -1,5 +1,5 @@
-#! /bin/bash
-for i in {1..100}
+#!/bin/bash
+for i in {1..50}
 do
-    go test -run 2A
+    go test -run 2B
 done

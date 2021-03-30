@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"6.824/labrpc"
-	"6.824/logger"
 )
 
 // Raft is a Go structure implementing a single Raft peer.
@@ -16,6 +15,7 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
+	size      int                 // cluster size
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
@@ -60,7 +60,7 @@ func (rf *Raft) mainLoop() {
 		rf.mu.Unlock()
 		/*-----------------------------------------*/
 
-		logger.Debug(rf.me, "mainLoop status=%+v", r)
+		Debug(rf, "mainLoop status=%+v", r)
 		switch r {
 		case Follower:
 			rf.followerLoop()
@@ -81,7 +81,7 @@ func (rf *Raft) followerLoop() {
 		// set a new Trigger and kick off
 		timeout := (TimerBase + time.Duration(rand.Intn(TimerRange))) * time.Millisecond
 		rf.trigger = NewTrigger()
-		logger.Debug(rf.me, "reset timer=%+v, startTime=%+v", timeout, rf.trigger.StartTime)
+		// Debug(rf, "reset timer=%+v, startTime=%+v", timeout, rf.trigger.StartTime)
 		go rf.elapseTrigger(timeout, rf.trigger.StartTime)
 
 		rf.mu.Unlock()
@@ -93,12 +93,14 @@ func (rf *Raft) followerLoop() {
 		rf.mu.Lock()
 		switch {
 		case rf.trigger.Elapsed: // timer naturally elapses, turns to Candidate
-			logger.Debug(rf.me, "Follower turns to Candidate, timeout=%+v", timeout)
+			Debug(rf, "Follower turns to Candidate, timeout=%+v", timeout)
 			rf.role = Candidate
+			rf.trigger = nil
 			rf.mu.Unlock()
 			return
 		default: // stays as Follower, set a new Trigger in the next round
 			rf.role = Follower
+			rf.trigger = nil
 		}
 		rf.mu.Unlock()
 		/*-----------------------------------------*/
@@ -108,7 +110,7 @@ func (rf *Raft) followerLoop() {
 func (rf *Raft) candidateLoop() {
 
 	for !rf.killed() {
-		logger.Debug(rf.me, "start new election")
+		Debug(rf, "start new election")
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
@@ -120,7 +122,7 @@ func (rf *Raft) candidateLoop() {
 		// set a new Trigger and kick off
 		timeout := TimerBase*time.Millisecond + time.Duration(rand.Intn(TimerRange))*time.Millisecond
 		rf.trigger = NewTrigger()
-		logger.Debug(rf.me, "candidate timer=%+v, term=%d", timeout, rf.currentTerm)
+		// Debug(rf, "candidate timer=%+v, term=%d", timeout, rf.currentTerm)
 		go rf.elapseTrigger(timeout, rf.trigger.StartTime)
 
 		// 获取最后一个LogEntry的信息
@@ -134,7 +136,7 @@ func (rf *Raft) candidateLoop() {
 		}
 
 		// 并发发送 RequestVote RPCs
-		for i := 0; i < len(rf.peers); i++ {
+		for i := 0; i < rf.size; i++ {
 			if i == rf.me {
 				continue
 			}
@@ -149,6 +151,7 @@ func (rf *Raft) candidateLoop() {
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		// 进入下一次循环前判断是否角色产生变化
 		rf.mu.Lock()
+		rf.trigger = nil
 		if rf.role != Candidate {
 			rf.mu.Unlock()
 			return
@@ -176,7 +179,7 @@ func (rf *Raft) leaderLoop() {
 	// 	Term:  rf.currentTerm,
 	// })
 
-	for i := 0; i < len(rf.peers); i++ {
+	for i := 0; i < rf.size; i++ {
 		// nextIndex[]: initialize to leader last logger index + 1
 		rf.nextIndex[i] = lastLogIndex + 1
 
@@ -186,7 +189,7 @@ func (rf *Raft) leaderLoop() {
 
 	rf.matchIndex[rf.me] = lastLogIndex
 
-	logger.Debug(rf.me, "Upon election, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+	Debug(rf, "Upon election, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 	rf.mu.Unlock()
 	/*-----------------------------------------*/
 
@@ -195,7 +198,7 @@ func (rf *Raft) leaderLoop() {
 		rf.mu.Lock()
 
 		// concurrently send heartbeats
-		for i := 0; i < len(rf.peers); i++ {
+		for i := 0; i < rf.size; i++ {
 			if i == rf.me {
 				continue
 			}
@@ -215,9 +218,10 @@ func (rf *Raft) leaderLoop() {
 			} else {
 				s := rf.logs[0].Index
 				idx := prevLogIndex - s
-				if idx >= len(rf.logs) {
+				if idx >= len(rf.logs) { // impossible
 					entries = make([]LogEntry, 0)
 				} else {
+					prevLogTerm = rf.logs[idx].Term
 					entries = rf.logs[idx+1:]
 				}
 			}
@@ -261,7 +265,7 @@ func (rf *Raft) replicateLoop() {
 		rf.mu.Lock()
 
 		// concurrently send RPC requests
-		for i := 0; i < len(rf.peers); i++ {
+		for i := 0; i < rf.size; i++ {
 			if rf.me == i {
 				continue
 			}
@@ -278,9 +282,10 @@ func (rf *Raft) replicateLoop() {
 				} else {
 					s := rf.logs[0].Index
 					idx := prevLogIndex - s
-					if idx >= len(rf.logs) {
+					if idx >= len(rf.logs) { // impossible
 						entries = make([]LogEntry, 0)
 					} else {
+						prevLogTerm = rf.logs[idx].Term
 						entries = rf.logs[idx+1:]
 					}
 				}
@@ -389,7 +394,7 @@ func (rf *Raft) sendRequestVote(server int, req RequestVoteRequest, st int64) {
 
 		rf.votes++
 
-		if rf.votes > len(rf.peers)/2 { // 获得当前任期的大多数选票
+		if rf.votes > rf.size/2 { // 获得当前任期的大多数选票
 			// 已经成为Leader了
 			if rf.role == Leader {
 				return
@@ -397,7 +402,7 @@ func (rf *Raft) sendRequestVote(server int, req RequestVoteRequest, st int64) {
 
 			// 获选Leader
 			rf.role = Leader
-			logger.Debug(rf.me, "#####LEADER ELECTED! votes=%d, Term=%d#####", rf.votes, rf.currentTerm)
+			Debug(rf, "#####LEADER ELECTED! votes=%d, Term=%d#####", rf.votes, rf.currentTerm)
 
 			// 结束定时器
 			rf.closeTrigger(st)
@@ -413,16 +418,16 @@ func (rf *Raft) sendRequestVote(server int, req RequestVoteRequest, st int64) {
 		// 更新任期，回退Follower
 		rf.currentTerm = resp.ResponseTerm
 		rf.role = Follower
-		logger.Debug(rf.me, "term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
+		Debug(rf, "term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
 
 		// 结束定时器
 		rf.closeTrigger(st)
 
 	case Rejected:
-		logger.Debug(rf.me, "VoteRequest to server %d is rejected", server)
+		Debug(rf, "VoteRequest to server %d is rejected", server)
 
 	case NetworkFailure:
-		logger.Debug(rf.me, "VoteRequest to server %d timeout", server)
+		Debug(rf, "VoteRequest to server %d timeout", server)
 	}
 	/*-----------------------------------------*/
 }
@@ -432,7 +437,7 @@ func (rf *Raft) sendRequestVote(server int, req RequestVoteRequest, st int64) {
 func (rf *Raft) sendAppendEntries(server int, req AppendEntriesRequest) {
 	for !rf.killed() {
 		var resp AppendEntriesResponse
-		logger.Debug(rf.me, "\nAppendEntries to %d\nMyTerm\t%d\nMyLog\t%+v\nAppend\t%+v", server, rf.currentTerm, rf.logs, req.Entries)
+		Debug(rf, "\nAppendEntries to %d\nMyTerm\t%d\nMyLog\t%+v\nAppend\t%+v", server, rf.currentTerm, rf.logs, req.Entries)
 
 		// 发送RPC请求。当不OK时，说明网络异常。
 		if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
@@ -455,7 +460,7 @@ func (rf *Raft) sendAppendEntries(server int, req AppendEntriesRequest) {
 			rf.matchIndex[server] = req.PrevLogIndex + len(req.Entries)
 			rf.nextIndex[server] = rf.matchIndex[server] + 1
 
-			logger.Debug(rf.me, "AppendEntries Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+			Debug(rf, "AppendEntries Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 			rf.leaderTryUpdateCommitIndex()
 
@@ -465,14 +470,14 @@ func (rf *Raft) sendAppendEntries(server int, req AppendEntriesRequest) {
 		case TermOutdated:
 
 			// term out-of-date, step down immediately
-			logger.Debug(rf.me, "AppendEntries TermOutdated, step down")
+			Debug(rf, "AppendEntries TermOutdated, step down")
 			rf.role = Follower
 			rf.currentTerm = resp.ResponseTerm
 			rf.mu.Unlock()
 			return
 
 		case LogInconsistent:
-			logger.Debug(rf.me, "Inconsistent with [Server %d], retry", server)
+			Debug(rf, "Inconsistent with [Server %d], retry", server)
 
 			// upon receiving a conflict response, the leader should first search its logger for conflictTerm.
 			// if it finds an entry in its logger with that term, it should set nextIndex to be the one
@@ -531,7 +536,7 @@ func (rf *Raft) sendAppendEntries(server int, req AppendEntriesRequest) {
 
 		case NetworkFailure:
 			// retry
-			logger.Debug(rf.me, "AppendEntries to %d timeout, retry", server)
+			Debug(rf, "AppendEntries to %d timeout, retry", server)
 		}
 		rf.mu.Unlock()
 		/*-----------------------------------------*/
@@ -542,7 +547,7 @@ func (rf *Raft) sendAppendEntries(server int, req AppendEntriesRequest) {
 func (rf *Raft) sendHeartBeat(server int, req AppendEntriesRequest) {
 	var resp AppendEntriesResponse
 
-	logger.Debug(rf.me, "\nHeartbeat to %d\nMyTerm\t%d\nMyLog\t%+v\nAppend\t%+v", server, rf.currentTerm, rf.logs, req.Entries)
+	Debug(rf, "\nHeartbeat to %d\nMyTerm\t%d\nMyLog\t%+v\nAppend\t%+v", server, rf.currentTerm, rf.logs, req.Entries)
 
 	// 发送RPC请求。当不OK时，说明网络异常。
 	if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
@@ -564,17 +569,17 @@ func (rf *Raft) sendHeartBeat(server int, req AppendEntriesRequest) {
 		rf.matchIndex[server] = req.PrevLogIndex + len(req.Entries)
 		rf.nextIndex[server] = rf.matchIndex[server] + 1
 
-		logger.Debug(rf.me, "HeartBeat Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+		Debug(rf, "HeartBeat Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 		rf.leaderTryUpdateCommitIndex()
 
 	case TermOutdated:
-		logger.Debug(rf.me, "AppendEntries TermOutdated, step down")
+		Debug(rf, "AppendEntries TermOutdated, step down")
 		rf.currentTerm = resp.ResponseTerm
 		rf.role = Follower
 
 	case LogInconsistent:
-		logger.Debug(rf.me, "Inconsistent with [Server %d]", server)
+		Debug(rf, "Inconsistent with [Server %d]", server)
 		l, r := 0, len(rf.logs)-1
 		// 寻找右边界
 		for l < r {
@@ -600,7 +605,7 @@ func (rf *Raft) sendHeartBeat(server int, req AppendEntriesRequest) {
 		}
 
 	case NetworkFailure:
-		logger.Debug(rf.me, "Heartbeat to %d timeout", server)
+		Debug(rf, "Heartbeat to %d timeout", server)
 		return
 	}
 	/*-----------------------------------------*/
@@ -610,9 +615,9 @@ func (rf *Raft) sendHeartBeat(server int, req AppendEntriesRequest) {
 // of matchIndex[i] ≥ N, and logger[N].term == currentTerm:
 // set commitIndex = N (§5.3, §5.4).
 func (rf *Raft) leaderTryUpdateCommitIndex() {
-	logger.Debug(rf.me, "leader try commit, current commitIdx=%d, term=%d", rf.commitIndex, rf.currentTerm)
+	Debug(rf, "leader try commit, current commitIdx=%d, term=%d", rf.commitIndex, rf.currentTerm)
 	for i := len(rf.logs) - 1; i >= 0; i-- {
-		logger.Debug(rf.me, "LogEntry Index=%d, Term=%d", rf.logs[i].Index, rf.logs[i].Term)
+		Debug(rf, "LogEntry Index=%d, Term=%d", rf.logs[i].Index, rf.logs[i].Term)
 		if rf.logs[i].Index <= rf.commitIndex {
 			break
 		}
@@ -627,7 +632,7 @@ func (rf *Raft) leaderTryUpdateCommitIndex() {
 					replicates++
 				}
 			}
-			logger.Debug(rf.me, "replicate=%d", replicates)
+			Debug(rf, "replicate=%d", replicates)
 
 			if replicates > len(rf.peers)/2 {
 				oldIndex := rf.commitIndex
@@ -652,11 +657,10 @@ func (rf *Raft) receiverTryUpdateCommitIndex(req *AppendEntriesRequest) {
 }
 
 func (rf *Raft) batchCommit(oldIndex int) {
+	Debug(rf, "commit index [%d %d]", oldIndex+1, rf.commitIndex)
 	for k := oldIndex + 1; k <= rf.commitIndex; k++ {
 		idx := k - rf.logs[0].Index
 		entry := rf.logs[idx]
-		logger.Debug(rf.me, "commit index[%d]", entry.Index)
-
 		msg := ApplyMsg{
 			CommandValid: true,
 			Command:      entry.Command,

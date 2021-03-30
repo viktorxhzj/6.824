@@ -1,4 +1,4 @@
-package logger
+package raft
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ var (
 	suffix        = ".logger"
 	INFO          = "[Debug] "
 	ERROR         = "[Error] "
-	enableDebug   = 1
+	enableDebug   = 0
 	enableConsole = 1
 	enableFile    = 1
 )
@@ -24,12 +24,12 @@ func init() {
 	}
 }
 
-func Debug(server int, format string, info ...interface{}) {
+func Debug(rf *Raft, format string, info ...interface{}) {
 	if enableDebug == 0 {
 		return
 	}
 
-	str := fmt.Sprintf("%s [NODE %d]", time.Now().Format("15:04:05.000"), server)
+	str := fmt.Sprintf("%s [NODE %d]", time.Now().Format("15:04:05.000"), rf.me)
 
 	str += fmt.Sprintf(format, info...)
 

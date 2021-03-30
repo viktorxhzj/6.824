@@ -122,7 +122,7 @@ func TestManyElections2A(t *testing.T) {
 }
 
 func TestBasicAgree2B(t *testing.T) {
-	servers := 3
+	servers := 5
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
