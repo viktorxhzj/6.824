@@ -15,8 +15,8 @@ type Trigger struct {
 func NewTrigger() *Trigger {
 	return &Trigger{
 		StartTime: time.Now().UnixNano(),
-		C: make(chan int),
-		On: true,
+		C:         make(chan int),
+		On:        true,
 	}
 }
 
@@ -65,26 +65,7 @@ func (rf *Raft) resetTrigger() {
 }
 
 func (rf *Raft) printLog() {
-	Debug(rf, "AppendEntries returns,logs=%+v", rf.logs)
-}
-
-// sliceIndex 找到某一日志行在当前日志切片所对应的索引
-// 如果该日志行不在日志切片中，返回-1
-// 合法的返回结果为 [0, 1, ...]
-func (rf *Raft) sliceIndex(logIndex int) int {
-	l, r := 0, len(rf.logs)-1
-	for l <= r {
-		m := (l + r) / 2
-
-		if rf.logs[m].Index > logIndex {
-			r--
-		} else if rf.logs[m].Index < logIndex {
-			l++
-		} else {
-			return m
-		}
-	}
-	return -1
+	Debug(rf, "AppendEntries returns")
 }
 
 func (rf *Raft) Kill() {

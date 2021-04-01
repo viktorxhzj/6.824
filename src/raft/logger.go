@@ -10,10 +10,8 @@ var (
 	file          *os.File
 	prefix        = "../logs/"
 	suffix        = ".logger"
-	INFO          = "[Debug] "
-	ERROR         = "[Error] "
-	enableDebug   = 0
-	enableConsole = 1
+	enableDebug   = 1
+	enableConsole = 0
 	enableFile    = 1
 )
 
@@ -29,7 +27,14 @@ func Debug(rf *Raft, format string, info ...interface{}) {
 		return
 	}
 
-	str := fmt.Sprintf("%s [NODE %d]", time.Now().Format("15:04:05.000"), rf.me)
+	str := fmt.Sprintf("%s ApplyIdx=%d,CommitIdx=%d,Term=%d [NODE %d] ", 
+	time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.me)
+
+	if len(rf.logs) == 0 {
+		str += "logs={}, "
+	} else {
+		str += fmt.Sprintf("{%+v -> %+v}", rf.logs[0], rf.logs[len(rf.logs)-1])
+	}
 
 	str += fmt.Sprintf(format, info...)
 
@@ -40,14 +45,14 @@ func Debug(rf *Raft, format string, info ...interface{}) {
 
 func write(str string) {
 	if enableFile == 1 {
-		_, err := file.WriteString(INFO + str)
+		_, err := file.WriteString(str)
 		if err != nil {
-			print(ERROR + "writing to file")
+			print("writing to file")
 			return
 		}
 	}
 
 	if enableConsole == 1 {
-		print(INFO + str)
+		print(str)
 	}
 }

@@ -1,5 +1,7 @@
 package raft
 
+import "fmt"
+
 type (
 	RPCInfo    int
 	MsgType    int
@@ -90,6 +92,15 @@ type AppendEntriesRequest struct {
 	Entries           []LogEntry
 }
 
+func (r AppendEntriesRequest) String() string {
+	s1 := fmt.Sprintf("PrevLogIdx=%d,PrevLogTerm=%d,", r.PrevLogIndex, r.PrevLogTerm)
+	if len(r.Entries) == 0 {
+		return s1 + "Entries={}"
+	} else {
+		return s1 + fmt.Sprintf("{%+v -> %+v}", r.Entries[0], r.Entries[len(r.Entries)-1])
+	}
+}
+
 // AppendEntriesResponse is a AppendEntries RPC response structure.
 type AppendEntriesResponse struct {
 	ResponseId    int
@@ -99,8 +110,16 @@ type AppendEntriesResponse struct {
 	Info          RPCInfo
 }
 
+func (r AppendEntriesResponse) String() string {
+	return fmt.Sprintf("RespTerm=%d,ConIdx=%d,ConTerm=%d", r.ResponseTerm, r.ConflictIndex, r.ConflictTerm)
+}
+
 type LogEntry struct {
 	Index   int
 	Term    int
 	Command interface{}
+}
+
+func (l LogEntry) String() string {
+	return fmt.Sprintf("[%d|%d]", l.Index, l.Term)
 }

@@ -7,5 +7,5 @@ import (
 
 func TestWhat(t *testing.T)  {
 	s := []int{1, 2, 3}
-	fmt.Println(s)
+	fmt.Println(s[:0])
 }
