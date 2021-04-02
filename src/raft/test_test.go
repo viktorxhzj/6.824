@@ -1077,10 +1077,20 @@ func TestSnapshotBasic2D(t *testing.T) {
 }
 
 func TestSnapshotInstall2D(t *testing.T) {
+	if enableConsole == 0 {
+		c := make(chan int)
+		go TimerForTest(c)
+		defer close(c)
+	}
 	snapcommon(t, "Test (2D): install snapshots (disconnect)", true, true, false)
 }
 
 func TestSnapshotInstallUnreliable2D(t *testing.T) {
+	if enableConsole == 0 {
+		c := make(chan int)
+		go TimerForTest(c)
+		defer close(c)
+	}
 	snapcommon(t, "Test (2D): install snapshots (disconnect+unreliable)",
 		true, false, false)
 }
@@ -1107,7 +1117,7 @@ outer:
 			time.Sleep(time.Second)
 		}
 		fmt.Printf("%02d second %s\n", t, s)
-		if t >= 60 {
+		if t >= 600 {
 			panic("panic_too_long")
 		}
 	}

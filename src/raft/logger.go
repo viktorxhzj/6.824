@@ -27,14 +27,16 @@ func Debug(rf *Raft, format string, info ...interface{}) {
 		return
 	}
 
-	str := fmt.Sprintf("%s ApplyIdx=%d,CommitIdx=%d,Term=%d [NODE %d] ", 
-	time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.me)
+	str := fmt.Sprintf("%s Apply=%d,Commit=%d,Term=%d,Off=%d, {...=>[%d|%d]}", 
+	time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.offset, rf.lastIncludedIndex, rf.lastIncludedTerm)
 
 	if len(rf.logs) == 0 {
-		str += "logs={}, "
+		str += "{}, "
 	} else {
-		str += fmt.Sprintf("{%+v -> %+v}", rf.logs[0], rf.logs[len(rf.logs)-1])
+		str += fmt.Sprintf("{%+v->%+v}", rf.logs[0], rf.logs[len(rf.logs)-1])
 	}
+
+	str += fmt.Sprintf(" [NODE %d]", rf.me)
 
 	str += fmt.Sprintf(format, info...)
 

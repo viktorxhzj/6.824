@@ -1,13 +1,11 @@
 package raft
 
 import (
-	"bytes"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
-	"6.824/labgob"
 	"6.824/labrpc"
 )
 
@@ -29,6 +27,8 @@ type Raft struct {
 	votedFor    int
 	logs        []LogEntry
 	offset      int
+	lastIncludedIndex int
+	lastIncludedTerm int
 
 	// volatile status
 	commitIndex      int
@@ -56,6 +56,104 @@ type Raft struct {
 
 func (rf *Raft) String() string {
 	return fmt.Sprintf("[NODE %d] term=%d,commitIdx=%d", rf.me, rf.currentTerm, rf.commitIndex)
+}
+
+
+// Make creates a pointer to a Raft Node.
+func Make(peers []*labrpc.ClientEnd, me int,
+	persister *Persister, applyCh chan ApplyMsg) *Raft {
+	rf := &Raft{}
+
+	rf.mu.Lock()
+	// Your initialization code here (2A, 2B, 2C).
+	rf.peers = peers
+	rf.persister = persister
+	rf.me = me
+	rf.size = len(peers)
+	rf.applyChan = applyCh
+	rf.logs = make([]LogEntry, 0)
+	rf.nextIndex = make([]int, len(peers))
+	rf.matchIndex = make([]int, len(peers))
+	rf.appendChan = make(chan int)
+	rf.offset = 1
+	rf.lastIncludedIndex = -1
+	rf.lastIncludedTerm = -1
+
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+	rf.mu.Unlock()
+
+	// start ticker goroutine to start elections
+	go rf.mainLoop()
+	go rf.replicateLoop()
+	go rf.applyLoop()
+
+	return rf
+}
+
+// GetState returns currentTerm and whether this server
+// believes it is the leader.
+func (rf *Raft) GetState() (int, bool) {
+
+	/*+++++++++++++++++++++++++++++++++++++++++*/
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	var term int
+	var isLeader bool
+
+	term = rf.currentTerm
+	isLeader = rf.role == Leader
+
+	return term, isLeader
+	/*-----------------------------------------*/
+}
+
+// Start tries to start agreement on the next command to be appended to Raft's log.
+func (rf *Raft) Start(command interface{}) (int, int, bool) {
+
+	/*+++++++++++++++++++++++++++++++++++++++++*/
+	rf.mu.Lock()
+
+	index, term := -1, -1
+	var isLeader bool
+
+	switch rf.role {
+	case Leader:
+		Debug(rf, "### LEADER RECEIVES COMMAND ###")
+
+		if len(rf.logs) > 0 {
+			index = rf.logs[len(rf.logs)-1].Index + 1
+		} else if len(rf.logs) == 0 && rf.lastIncludedIndex != -1 {
+			index = rf.lastIncludedIndex + 1
+		} else {
+			index = 1
+		}
+		term = rf.currentTerm
+
+		isLeader = true
+
+		// local append
+		rf.logs = append(rf.logs, LogEntry{
+			Index:   index,
+			Term:    term,
+			Command: command,
+		})
+		rf.persist()
+
+		Debug(rf, "Log after local append")
+		rf.matchIndex[rf.me] = index
+		rf.nextIndex[rf.me] = index + 1
+
+		rf.mu.Unlock()
+		// send a signal
+		rf.appendChan <- 0
+
+	default:
+		rf.mu.Unlock()
+	}
+	return index, term, isLeader
+	/*-----------------------------------------*/
 }
 
 // execute different processes based on the role of this Raft node.
@@ -143,7 +241,7 @@ func (rf *Raft) candidateLoop() {
 				continue
 			}
 
-			go rf.sendRequestVoteV2(i, rf.trigger.StartTime)
+			go rf.sendRequestVote(i, rf.trigger.StartTime)
 		}
 
 		// 并发发送 RequestVote RPCs
@@ -195,162 +293,4 @@ func (rf *Raft) leaderLoop() {
 		sleeper := time.NewTimer(HeartBeatInterval * time.Millisecond)
 		<-sleeper.C
 	}
-}
-
-//
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-//
-func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.logs)
-	e.Encode(rf.offset)
-	data := w.Bytes()
-	rf.persister.SaveRaftState(data)
-}
-
-//
-// restore previously persisted state.
-//
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	// Your code here (2C).
-	// Example:
-	r := bytes.NewBuffer(data)
-	d := labgob.NewDecoder(r)
-	var currentTerm, votedFor, offset int
-	var logs []LogEntry
-	if d.Decode(&currentTerm) != nil ||
-		d.Decode(&votedFor) != nil ||
-		d.Decode(&logs) != nil ||
-		d.Decode(&offset) != nil {
-		panic("BAD PERSIST")
-	} else {
-		rf.currentTerm = currentTerm
-		rf.votedFor = votedFor
-		rf.logs = logs
-		rf.offset = offset
-	}
-}
-
-//
-// CondInstallSnapshot is a service wants to switch to snapshot.  Only do so if Raft hasn't
-// have more recent info since it communicate the snapshot on applyCh.
-//
-func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
-	// Your code here (2D).
-
-	return true
-}
-
-// Snapshot is the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
-
-}
-
-// sendRequestVote 发送RPC请求，并处理RPC返回
-// 该函数为异步调用
-func (rf *Raft) sendRequestVote(server int, req RequestVoteRequest, st int64) {
-	var resp RequestVoteResponse
-
-	// 发送RPC请求。当不OK时，说明网络异常。
-	if ok := rf.peers[server].Call("Raft.RequestVoteHandler", &req, &resp); !ok {
-		resp.Info = NetworkFailure
-	}
-
-	/*+++++++++++++++++++++++++++++++++++++++++*/
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	// 在RPC返回时，有可能已经退回到Follower或者获选为Leader了。
-	if rf.role != Candidate {
-		return
-	}
-
-	switch resp.Info {
-	case Granted: // 获得投票
-
-		// 在获得这张投票时，自己的任期已经更新了，则选票无效。
-		if rf.currentTerm != req.CandidateTerm {
-			return
-		}
-
-		rf.votes++
-
-		if rf.votes > rf.size/2 { // 获得当前任期的大多数选票
-			// 已经成为Leader了
-			if rf.role == Leader {
-				return
-			}
-
-			// 获选Leader
-			rf.role = Leader
-			Debug(rf, "#####LEADER ELECTED! votes=%d, Term=%d#####", rf.votes, rf.currentTerm)
-
-			// reinitialize volatile status after election
-			// 空日志返回索引0
-			entry, _ := rf.lastLogInfo()
-			lastLogIndex := entry.Index
-
-			// 当选时，自动填充一个空 LogEntry
-			// lastLogIndex++
-			// rf.logs = append(rf.logs, LogEntry{
-			// 	Index: lastLogIndex,
-			// 	Term:  rf.currentTerm,
-			// })
-			// rf.persist()
-
-			for i := 0; i < rf.size; i++ {
-				// nextIndex[]: initialize to leader last logger index + 1
-				// 初始化为1，最小不会小于1
-				rf.nextIndex[i] = lastLogIndex + 1
-
-				// matchIndex[]: initialize to 0
-				rf.matchIndex[i] = 0
-			}
-
-			rf.matchIndex[rf.me] = lastLogIndex
-
-			Debug(rf, "Upon election, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
-
-			// 结束定时器
-			rf.closeTrigger(st)
-
-		}
-
-	case TermOutdated: // 发送RPC时的任期过期
-		// 有可能现在的任期是最新的
-		if rf.currentTerm >= resp.ResponseTerm {
-			return
-		}
-
-		// 更新任期，回退Follower
-		rf.currentTerm = resp.ResponseTerm
-		rf.role = Follower
-		rf.persist()
-		Debug(rf, "term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
-
-		// 结束定时器
-		rf.closeTrigger(st)
-
-	case Rejected:
-		Debug(rf, "VoteRequest to server %d is rejected", server)
-
-	case NetworkFailure:
-		Debug(rf, "VoteRequest to server %d timeout", server)
-	}
-	/*-----------------------------------------*/
 }

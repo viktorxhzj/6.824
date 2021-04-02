@@ -6,19 +6,20 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
-	defer rf.printLog()
-
+	defer rf.mu.Unlock()
+	defer Debug(rf, "追加RPC返回")
+	Debug(rf, "追加RPC %+v", *req)
 	resp.ResponseTerm = rf.currentTerm
 
 	// 1. Reply false if term < currentTerm (§5.1)
 	if req.LeaderTerm < rf.currentTerm {
 		resp.Info = TermOutdated
-		rf.mu.Unlock()
 		return
 	}
 
 	// reset the Trigger
 	rf.resetTrigger()
+
 
 	// If RPC request or response contains term T > currentTerm:
 	// set currentTerm = T, convert to follower (§5.1)
@@ -41,11 +42,15 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		resp.Info = LogInconsistent
 		resp.ConflictIndex = len(rf.logs)
 		resp.ConflictTerm = -1
-		rf.mu.Unlock()
 		return
 
-	case sliceIdx == -1:
+	case sliceIdx == -1 && req.PrevLogIndex == 0:
 		// entirely different from the beginning
+
+	case sliceIdx == -1 && req.PrevLogIndex == rf.lastIncludedIndex:
+		
+	case sliceIdx < 0:
+		panic("NOT EXISTS")
 
 	default:
 		// 2. Reply false if logger doesn't contain an entry at prevLogIndex
@@ -60,7 +65,6 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 			}
 
 			resp.Info = LogInconsistent
-			rf.mu.Unlock()
 			return
 		}
 	}
@@ -89,12 +93,12 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	// 5. If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
 	rf.receiverTryUpdateCommitIndex(req)
-	rf.mu.Unlock()
 	/*-----------------------------------------*/
 }
 
 func (rf *Raft) sendAppendEntries(server int) {
 	var req AppendEntriesRequest
+outer:
 	for !rf.killed() {
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
@@ -103,17 +107,62 @@ func (rf *Raft) sendAppendEntries(server int) {
 			rf.mu.Unlock()
 			return
 		}
-		if rf.logs[len(rf.logs)-1].Index >= rf.nextIndex[server] {
+		if len(rf.logs) != 0 && rf.logs[len(rf.logs)-1].Index >= rf.nextIndex[server] {
 
+			// 0代表从头开始
 			prevLogIndex := rf.nextIndex[server] - 1
-			rf.updateRequest2(server, &req, prevLogIndex)
+			needSnapShot := rf.updateRequest2(server, &req, prevLogIndex)
 
 			var resp AppendEntriesResponse
+			var snapReq InstallSnapshotRequest
 
-			Debug(rf, "AppendEntries to NODE %d, req=%+v", server, req)
+			if !needSnapShot {
+				Debug(rf, "追加RPC-> [NODE %d] %+v", server, req)
+			} else {
+				Debug(rf, "[NODE %d] 需要快照", server)
+				snapReq.LeaderId = rf.me
+				snapReq.LeaderTerm = rf.currentTerm
+				snapReq.Snapshot = rf.lastestSnapshot()
+			}
 
 			rf.mu.Unlock()
 			/*-----------------------------------------*/
+
+			if needSnapShot {
+				var snapResp InstallSnapshotResponse
+				// 发送RPC请求。当不OK时，说明网络异常。
+				if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
+					snapResp.Info = NetworkFailure
+				}
+
+				rf.mu.Lock()
+				// 如果已经不为Leader，终止循环
+				if rf.role != Leader {
+					rf.mu.Unlock()
+					return
+				}
+
+				switch snapResp.Info {
+				case Success:
+					rf.nextIndex[server] = rf.lastIncludedIndex+1
+					rf.mu.Unlock()
+					continue outer
+
+				case TermOutdated:
+					// term out-of-date, step down immediately
+					Debug(rf, "InstallSnapshot TermOutdated, step down")
+					rf.role = Follower
+					rf.currentTerm = resp.ResponseTerm
+					rf.persist()
+					rf.mu.Unlock()
+					return
+
+				case NetworkFailure:
+					Debug(rf, "InstallSnapshot to %d timeout, retry", server)
+					rf.mu.Unlock()
+					continue outer
+				}
+			}
 
 			// 发送RPC请求。当不OK时，说明网络异常。
 			if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
@@ -134,11 +183,11 @@ func (rf *Raft) sendAppendEntries(server int) {
 			case Success:
 				Debug(rf, "###PrevIdx=%d,Len=%d", req.PrevLogIndex, len(req.Entries))
 				if n := req.PrevLogIndex + len(req.Entries); n > rf.matchIndex[server] {
-					rf.matchIndex[server] = req.PrevLogIndex + len(req.Entries)
+					rf.matchIndex[server] = n
 					rf.nextIndex[server] = rf.matchIndex[server] + 1
 				}
 
-				Debug(rf, "AppendEntries Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+				Debug(rf, "追加成功, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 				rf.leaderTryUpdateCommitIndex()
 
@@ -155,7 +204,7 @@ func (rf *Raft) sendAppendEntries(server int) {
 				return
 
 			case LogInconsistent:
-				Debug(rf, "Inconsistent with [Server %d]", server)
+				Debug(rf, "日志不同步 [Node %d]", server)
 
 				// upon receiving a conflict response, the leader should first search its logger for conflictTerm.
 				// if it finds an entry in its logger with that term, it should set nextIndex to be the one
@@ -187,7 +236,7 @@ func (rf *Raft) sendAppendEntries(server int) {
 
 			case NetworkFailure:
 				// retry
-				Debug(rf, "AppendEntries to %d timeout, retry", server)
+				Debug(rf, "追加RPC-> %d timeout, retry", server)
 				rf.mu.Unlock()
 			}
 		} else {
@@ -205,15 +254,56 @@ func (rf *Raft) sendHeartBeat(server int) {
 		rf.mu.Unlock()
 		return
 	}
+	var snapReq InstallSnapshotRequest
 	var req AppendEntriesRequest
 	var resp AppendEntriesResponse
 
 	prevLogIndex := rf.nextIndex[server] - 1
-	rf.updateRequest2(server, &req, prevLogIndex)
-	Debug(rf, "HeartBeat to NODE %d, req=%+v", server, req)
+	needSnapShot := rf.updateRequest2(server, &req, prevLogIndex)
+
+	if !needSnapShot {
+		Debug(rf, "心跳RPC-> [NODE %d] %+v", server, req)
+	} else {
+		Debug(rf, "[NODE %d] 需要快照", server)
+		snapReq.LeaderId = rf.me
+		snapReq.LeaderTerm = rf.currentTerm
+		snapReq.Snapshot = rf.lastestSnapshot()
+	}
 
 	rf.mu.Unlock()
 	/*-----------------------------------------*/
+
+	if needSnapShot {
+		var snapResp InstallSnapshotResponse
+		// 发送RPC请求。当不OK时，说明网络异常。
+		if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
+			snapResp.Info = NetworkFailure
+		}
+
+		rf.mu.Lock()
+		// 如果已经不为Leader，终止循环
+		if rf.role != Leader {
+			rf.mu.Unlock()
+			return
+		}
+
+		switch snapResp.Info {
+		case Success:
+			rf.nextIndex[server] = rf.lastIncludedIndex+1
+
+		case TermOutdated:
+			// term out-of-date, step down immediately
+			Debug(rf, "InstallSnapshot TermOutdated, step down")
+			rf.role = Follower
+			rf.currentTerm = resp.ResponseTerm
+			rf.persist()
+
+		case NetworkFailure:
+			Debug(rf, "InstallSnapshot to %d timeout, retry", server)
+		}
+		rf.mu.Unlock()
+		return
+	}
 
 	// 发送RPC请求。当不OK时，说明网络异常。
 	if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
@@ -237,7 +327,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 			rf.nextIndex[server] = rf.matchIndex[server] + 1
 		}
 
-		Debug(rf, "HeartBeat Success, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+		Debug(rf, "心跳成功, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 		rf.leaderTryUpdateCommitIndex()
 
@@ -248,7 +338,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 		rf.persist()
 
 	case LogInconsistent:
-		Debug(rf, "Inconsistent with [Server %d]", server)
+		Debug(rf, "日志不同步 [Server %d]", server)
 
 		// if ConflictTerm == -1
 		if resp.ConflictIndex == 0 {
@@ -286,13 +376,24 @@ func (rf *Raft) updateRequest1(req *AppendEntriesRequest, idx int) {
 	req.LeaderCommitIndex = rf.commitIndex
 }
 
-func (rf *Raft) updateRequest2(server int, req *AppendEntriesRequest, prevLogIndex int) {
+func (rf *Raft) updateRequest2(server int, req *AppendEntriesRequest, prevLogIndex int) bool {
 	var prevLogTerm int
 	var entries []LogEntry
 
 	// 全量拷贝
 	if prevLogIndex == 0 {
 		// prevLogTerm = 0
+		if len(rf.logs) == 0 && rf.lastIncludedIndex != -1 {
+			return true
+		}
+		if len(rf.logs) != 0 && rf.logs[0].Index != 1 {
+			return true
+		}
+		entries = rf.logs
+	} else if prevLogIndex-rf.offset < -1 {
+		return true
+	} else if prevLogIndex-rf.offset == -1 {
+		prevLogTerm = rf.lastIncludedTerm
 		entries = rf.logs
 	} else {
 		prevLogTerm = rf.logs[prevLogIndex-rf.offset].Term
@@ -304,6 +405,7 @@ func (rf *Raft) updateRequest2(server int, req *AppendEntriesRequest, prevLogInd
 	req.PrevLogTerm = prevLogTerm
 	req.Entries = entries
 	req.LeaderCommitIndex = rf.commitIndex
+	return false
 }
 
 func (rf *Raft) searchRightIndex(conflictTerm int) int {

@@ -68,16 +68,28 @@ func (rf *Raft) receiverTryUpdateCommitIndex(req *AppendEntriesRequest) {
 func (rf *Raft) batchApply() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if rf.commitIndex > rf.lastAppliedIndex {
+		//Debug(rf, "batch apply range %d -> %d", rf.lastAppliedIndex+1, rf.commitIndex)
+	}
 	for rf.commitIndex > rf.lastAppliedIndex {
 		rf.lastAppliedIndex++
-		entry := rf.logs[rf.lastAppliedIndex-rf.offset]
+		idx := rf.lastAppliedIndex-rf.offset
+		if idx < 0 {
+			continue
+		}
+		entry := rf.logs[idx]
 		msg := ApplyMsg{
-				CommandValid: true,
-				Command:      entry.Command,
-				CommandIndex: entry.Index,
-				CommandTerm:  entry.Term,
-			}	
+			CommandValid: true,
+			Command:      entry.Command,
+			CommandIndex: entry.Index,
+			CommandTerm:  entry.Term,
+		}
+		rf.mu.Unlock()
+
 		rf.applyChan <- msg
+
+		rf.mu.Lock()
+		Debug(rf, "应用日志 [%d|%d]", msg.CommandIndex, msg.CommandTerm)
 	}
 }
 

@@ -95,7 +95,7 @@ type AppendEntriesRequest struct {
 func (r AppendEntriesRequest) String() string {
 	s1 := fmt.Sprintf("PrevLogIdx=%d,PrevLogTerm=%d,", r.PrevLogIndex, r.PrevLogTerm)
 	if len(r.Entries) == 0 {
-		return s1 + "Entries={}"
+		return s1 + "{}"
 	} else {
 		return s1 + fmt.Sprintf("{%+v -> %+v}", r.Entries[0], r.Entries[len(r.Entries)-1])
 	}
@@ -122,4 +122,26 @@ type LogEntry struct {
 
 func (l LogEntry) String() string {
 	return fmt.Sprintf("[%d|%d]", l.Index, l.Term)
+}
+
+type Snapshot struct {
+	Data []byte
+	LastIncludedIndex int
+	LastIncludedTerm int
+}
+
+func (s Snapshot) String() string {
+	return fmt.Sprintf("{SNAPSHOT=>[%d|%d]}", s.LastIncludedIndex, s.LastIncludedTerm)
+}
+
+type InstallSnapshotRequest struct {
+	LeaderTerm int
+	LeaderId int
+	Snapshot
+}
+
+type InstallSnapshotResponse struct {
+	ResponseId    int
+	ResponseTerm  int
+	Info          RPCInfo
 }

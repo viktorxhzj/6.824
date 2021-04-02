@@ -1,6 +1,71 @@
 package raft
 
-func (rf *Raft) sendRequestVoteV2(server int, st int64) {
+
+// RequestVoteHandler is the RPC handler for RequestVote
+// Candidate to Follower/Candidate/Stale Leader
+func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteResponse) {
+
+	/*+++++++++++++++++++++++++++++++++++++++++*/
+	rf.mu.Lock()
+
+	resp.ResponseTerm = rf.currentTerm
+
+	// 1. Reply false if term < currentTerm (§5.1)
+	if req.CandidateTerm < rf.currentTerm {
+		Debug(rf, "reject VoteRequest from %d, my term is newer", req.CandidateId)
+
+		resp.Info = TermOutdated
+		rf.mu.Unlock()
+		return
+	}
+
+	var lastIndex, lastTerm int
+	// 获取最后一个log的信息
+	if len(rf.logs) != 0 {
+		lastIndex, lastTerm = rf.logs[len(rf.logs)-1].Index, rf.logs[len(rf.logs)-1].Term
+	} else {
+		lastIndex, lastTerm = rf.lastIncludedIndex, rf.lastIncludedTerm
+	}
+
+	// If RPC request or response contains term T > currentTerm:
+	// set currentTerm = T, convert to follower (§5.1)
+	if req.CandidateTerm > rf.currentTerm {
+		rf.currentTerm = req.CandidateTerm
+		rf.votedFor = NoVote
+		rf.persist()
+		rf.role = Follower
+	}
+
+	// if already voted, reject
+	if rf.votedFor != NoVote && rf.votedFor != req.CandidateId {
+		Debug(rf, "reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
+
+		resp.Info = Rejected
+		rf.mu.Unlock()
+		return
+	}
+
+	// if logger is not up-to-date, reject
+	if lastTerm > req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex > req.LastLogIndex) {
+		Debug(rf, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
+
+		resp.Info = Rejected
+		rf.mu.Unlock()
+		return
+	}
+
+	// if votedFor is null or candidateId, and candidate's logger is at least as up-to-date as receiver's logger, grant vote
+	Debug(rf, "vote for %d, our Term=%d", req.CandidateId, req.CandidateTerm)
+	rf.votedFor = req.CandidateId
+	rf.persist()
+
+	resp.Info = Granted
+	rf.resetTrigger()
+	rf.mu.Unlock()
+	/*-----------------------------------------*/
+}
+
+func (rf *Raft) sendRequestVote(server int, st int64) {
 
 	rf.mu.Lock()
 	if rf.role != Candidate {
@@ -10,14 +75,20 @@ func (rf *Raft) sendRequestVoteV2(server int, st int64) {
 
 	var req RequestVoteRequest
 	var resp RequestVoteResponse
-	// 获取最后一个LogEntry的信息
-	entry, _ := rf.lastLogInfo()
+
+	var lastIndex, lastTerm int
+	// 获取最后一个log的信息
+	if len(rf.logs) != 0 {
+		lastIndex, lastTerm = rf.logs[len(rf.logs)-1].Index, rf.logs[len(rf.logs)-1].Term
+	} else {
+		lastIndex, lastTerm = rf.lastIncludedIndex, rf.lastIncludedTerm
+	}
 
 	req = RequestVoteRequest{
 		CandidateTerm: rf.currentTerm,
 		CandidateId:   rf.me,
-		LastLogIndex:  entry.Index,
-		LastLogTerm:   entry.Term,
+		LastLogIndex:  lastIndex,
+		LastLogTerm:   lastTerm,
 	}
 
 	rf.mu.Unlock()
@@ -72,7 +143,7 @@ func (rf *Raft) sendRequestVoteV2(server int, st int64) {
 
 			for i := 0; i < rf.size; i++ {
 				// nextIndex[]: initialize to leader last logger index + 1
-				// 初始化为1，最小不会小于1
+				// 初始化为1
 				rf.nextIndex[i] = lastLogIndex + 1
 
 				// matchIndex[]: initialize to 0
