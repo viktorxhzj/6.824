@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -87,4 +88,25 @@ func (rf *Raft) lastLogInfo() (LogEntry, bool) {
 	}
 
 	return rf.logs[len(rf.logs)-1], true
+}
+
+
+func TimerForTest(c chan int) {
+	var t int
+	var s string
+outer:
+	for {
+		select {
+		case <-c:
+			break outer
+		default:
+			t++
+			s += "*"
+			time.Sleep(time.Second)
+		}
+		fmt.Printf("%02d second %s\n", t, s)
+		if t >= 100 {
+			panic("panic_too_long")
+		}
+	}
 }

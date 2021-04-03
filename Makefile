@@ -11,6 +11,7 @@ LABS=" lab1 lab2a lab2b lab2c lab2d lab3a lab3b lab4a lab4b "
 		echo "Tarring up your submission..." ; \
 		tar cvzf $@-handin.tar.gz \
 			"--exclude=src/main/pg-*.txt" \
+			"--exclude=src/logs" \
 			"--exclude=src/main/diskvd" \
 			"--exclude=src/mapreduce/824-mrinput-*.txt" \
 			"--exclude=src/main/mr-*" \

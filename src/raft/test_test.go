@@ -20,7 +20,7 @@ import "sync"
 const RaftElectionTimeout = 1000 * time.Millisecond
 
 func TestInitialElection2A(t *testing.T) {
-	servers := 5
+	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -51,7 +51,7 @@ func TestInitialElection2A(t *testing.T) {
 }
 
 func TestReElection2A(t *testing.T) {
-	servers := 5
+	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -72,13 +72,11 @@ func TestReElection2A(t *testing.T) {
 	// be elected.
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
-	cfg.disconnect((leader2 + 2) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 	cfg.checkNoLeader()
 
 	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
-	cfg.disconnect((leader2 + 2) % servers)
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
@@ -122,7 +120,7 @@ func TestManyElections2A(t *testing.T) {
 }
 
 func TestBasicAgree2B(t *testing.T) {
-	servers := 5
+	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -413,10 +411,10 @@ func TestBackup2B(t *testing.T) {
 	cfg.one(rand.Int(), servers, true)
 
 	// put leader and one follower in a partition
-	leader1 := cfg.checkOneLeader()         // 4
-	cfg.disconnect((leader1 + 2) % servers) // 1
-	cfg.disconnect((leader1 + 3) % servers) // 2
-	cfg.disconnect((leader1 + 4) % servers) // 3
+	leader1 := cfg.checkOneLeader()
+	cfg.disconnect((leader1 + 2) % servers)
+	cfg.disconnect((leader1 + 3) % servers)
+	cfg.disconnect((leader1 + 4) % servers)
 
 	// submit lots of commands that won't commit
 	for i := 0; i < 50; i++ {
@@ -439,8 +437,8 @@ func TestBackup2B(t *testing.T) {
 	}
 
 	// now another partitioned leader and one follower
-	leader2 := cfg.checkOneLeader()  // 3
-	other := (leader1 + 2) % servers // 1
+	leader2 := cfg.checkOneLeader()
+	other := (leader1 + 2) % servers
 	if leader2 == other {
 		other = (leader2 + 1) % servers
 	}
@@ -457,9 +455,9 @@ func TestBackup2B(t *testing.T) {
 	for i := 0; i < servers; i++ {
 		cfg.disconnect(i)
 	}
-	cfg.connect((leader1 + 0) % servers) // 4
-	cfg.connect((leader1 + 1) % servers) // 0
-	cfg.connect(other)                   // 1
+	cfg.connect((leader1 + 0) % servers)
+	cfg.connect((leader1 + 1) % servers)
+	cfg.connect(other)
 
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
@@ -803,10 +801,6 @@ func TestUnreliableAgree2C(t *testing.T) {
 }
 
 func TestFigure8Unreliable2C(t *testing.T) {
-	c := make(chan int)
-	go TimerForTest(c)
-	defer close(c)
-
 	servers := 5
 	cfg := make_config(t, servers, true, false)
 	defer cfg.cleanup()
@@ -857,6 +851,7 @@ func TestFigure8Unreliable2C(t *testing.T) {
 	}
 
 	cfg.one(rand.Int()%10000, servers, true)
+
 	cfg.end()
 }
 
@@ -1010,9 +1005,6 @@ func TestReliableChurn2C(t *testing.T) {
 }
 
 func TestUnreliableChurn2C(t *testing.T) {
-	c := make(chan int)
-	go TimerForTest(c)
-	defer close(c)
 	internalChurn(t, true)
 }
 
@@ -1077,20 +1069,10 @@ func TestSnapshotBasic2D(t *testing.T) {
 }
 
 func TestSnapshotInstall2D(t *testing.T) {
-	if enableConsole == 0 {
-		c := make(chan int)
-		go TimerForTest(c)
-		defer close(c)
-	}
 	snapcommon(t, "Test (2D): install snapshots (disconnect)", true, true, false)
 }
 
 func TestSnapshotInstallUnreliable2D(t *testing.T) {
-	if enableConsole == 0 {
-		c := make(chan int)
-		go TimerForTest(c)
-		defer close(c)
-	}
 	snapcommon(t, "Test (2D): install snapshots (disconnect+unreliable)",
 		true, false, false)
 }
@@ -1101,24 +1083,4 @@ func TestSnapshotInstallCrash2D(t *testing.T) {
 
 func TestSnapshotInstallUnCrash2D(t *testing.T) {
 	snapcommon(t, "Test (2D): install snapshots (unreliable+crash)", false, false, true)
-}
-
-func TimerForTest(c chan int) {
-	var t int
-	var s string
-outer:
-	for {
-		select {
-		case <-c:
-			break outer
-		default:
-			t++
-			s += "*"
-			time.Sleep(time.Second)
-		}
-		fmt.Printf("%02d second %s\n", t, s)
-		if t >= 600 {
-			panic("panic_too_long")
-		}
-	}
 }
