@@ -8,33 +8,23 @@ type (
 )
 
 const (
-	TimerBase         = 200
-	TimerRange        = 300
-	HeartBeatInterval = 150
+	TIMER_BASE         = 200
+	TIMER_RANGE        = 300
+	HEARTBEAT_INTERVAL = 150
 
-	Follower  = 0
-	Candidate = 1
-	Leader    = 2
+	FOLLOWER  = 0
+	CANDIDATE = 1
+	LEADER    = 2
 
 	// Common
-	TermOutdated   RPCInfo = 0
-	NetworkFailure RPCInfo = 1
+	TERM_OUTDATED   RPCInfo = 0
+	NETWORK_FAILURE RPCInfo = 1
 	// AppendEntries
-	Success         RPCInfo = 2
-	LogInconsistent RPCInfo = 3
+	SUCCESS         RPCInfo = 2
+	LOG_INCONSISTENT RPCInfo = 3
 	// RequestVote
-	Granted  RPCInfo = 4
-	Rejected RPCInfo = 5
-
-	Apply   MsgType = 0
-	NoneOp  MsgType = 1
-	Persist MsgType = 2
-
-	NoVote             = -1
-	SliceIndexStart    = -1
-	SliceIndexNotFound = -2
-	LogIndexZero       = 0
-	None               = -1
+	VOTE_GRANTED  RPCInfo = 4
+	VOTE_REJECTED RPCInfo = 5
 )
 
 var (

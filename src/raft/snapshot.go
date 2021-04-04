@@ -10,21 +10,21 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	resp.ResponseTerm = rf.currentTerm
 
 	if req.LeaderTerm < rf.currentTerm {
-		resp.Info = TermOutdated
+		resp.Info = TERM_OUTDATED
 		return
 	}
 
 	// reset the Trigger
 	rf.resetTrigger()
 
-	resp.Info = Success
+	resp.Info = SUCCESS
 
 	// If RPC request or response contains term T > currentTerm:
 	// set currentTerm = T, convert to follower (§5.1)
 	if req.LeaderTerm > rf.currentTerm {
 		rf.currentTerm = req.LeaderTerm
 		rf.persist()
-		rf.role = Follower
+		rf.role = FOLLOWER
 	}
 
 	rf.lastIncludedIndex = req.LastIncludedIndex

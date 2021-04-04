@@ -13,7 +13,7 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 
 	// 1. Reply false if term < currentTerm (§5.1)
 	if req.LeaderTerm < rf.currentTerm {
-		resp.Info = TermOutdated
+		resp.Info = TERM_OUTDATED
 		return
 	}
 
@@ -26,7 +26,7 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	if req.LeaderTerm > rf.currentTerm {
 		rf.currentTerm = req.LeaderTerm
 		rf.persist()
-		rf.role = Follower
+		rf.role = FOLLOWER
 	}
 
 	// 负值原文没讨论到
@@ -39,7 +39,7 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	case sliceIdx >= len(rf.logs):
 		// If a follower does not have prevLogIndex in its log,
 		// it should return with conflictIndex = len(log) and conflictTerm = None.
-		resp.Info = LogInconsistent
+		resp.Info = LOG_INCONSISTENT
 		resp.ConflictIndex = len(rf.logs)
 		resp.ConflictTerm = -1
 		return
@@ -64,12 +64,12 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 				}
 			}
 
-			resp.Info = LogInconsistent
+			resp.Info = LOG_INCONSISTENT
 			return
 		}
 	}
 
-	resp.Info = Success
+	resp.Info = SUCCESS
 
 	// 3. If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
@@ -103,7 +103,7 @@ outer:
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
-		if rf.role != Leader {
+		if rf.role != LEADER {
 			rf.mu.Unlock()
 			return
 		}
@@ -132,32 +132,32 @@ outer:
 				var snapResp InstallSnapshotResponse
 				// 发送RPC请求。当不OK时，说明网络异常。
 				if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
-					snapResp.Info = NetworkFailure
+					snapResp.Info = NETWORK_FAILURE
 				}
 
 				rf.mu.Lock()
 				// 如果已经不为Leader，终止循环
-				if rf.role != Leader {
+				if rf.role != LEADER {
 					rf.mu.Unlock()
 					return
 				}
 
 				switch snapResp.Info {
-				case Success:
+				case SUCCESS:
 					rf.nextIndex[server] = rf.lastIncludedIndex+1
 					rf.mu.Unlock()
 					continue outer
 
-				case TermOutdated:
+				case TERM_OUTDATED:
 					// term out-of-date, step down immediately
 					Debug(rf, "InstallSnapshot TermOutdated, step down")
-					rf.role = Follower
+					rf.role = FOLLOWER
 					rf.currentTerm = resp.ResponseTerm
 					rf.persist()
 					rf.mu.Unlock()
 					return
 
-				case NetworkFailure:
+				case NETWORK_FAILURE:
 					Debug(rf, "InstallSnapshot to %d timeout, retry", server)
 					rf.mu.Unlock()
 					continue outer
@@ -166,21 +166,21 @@ outer:
 
 			// 发送RPC请求。当不OK时，说明网络异常。
 			if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
-				resp.Info = NetworkFailure
+				resp.Info = NETWORK_FAILURE
 			}
 
 			/*+++++++++++++++++++++++++++++++++++++++++*/
 			rf.mu.Lock()
 
 			// 如果已经不为Leader，终止循环
-			if rf.role != Leader {
+			if rf.role != LEADER {
 				rf.mu.Unlock()
 				return
 			}
 
 			switch resp.Info {
 
-			case Success:
+			case SUCCESS:
 				Debug(rf, "###PrevIdx=%d,Len=%d", req.PrevLogIndex, len(req.Entries))
 				if n := req.PrevLogIndex + len(req.Entries); n > rf.matchIndex[server] {
 					rf.matchIndex[server] = n
@@ -194,16 +194,16 @@ outer:
 				rf.mu.Unlock()
 				return
 
-			case TermOutdated:
+			case TERM_OUTDATED:
 				// term out-of-date, step down immediately
 				Debug(rf, "AppendEntries TermOutdated, step down")
-				rf.role = Follower
+				rf.role = FOLLOWER
 				rf.currentTerm = resp.ResponseTerm
 				rf.persist()
 				rf.mu.Unlock()
 				return
 
-			case LogInconsistent:
+			case LOG_INCONSISTENT:
 				Debug(rf, "日志不同步 [Node %d]", server)
 
 				// upon receiving a conflict response, the leader should first search its logger for conflictTerm.
@@ -234,7 +234,7 @@ outer:
 				}
 				rf.mu.Unlock()
 
-			case NetworkFailure:
+			case NETWORK_FAILURE:
 				// retry
 				Debug(rf, "追加RPC-> %d timeout, retry", server)
 				rf.mu.Unlock()
@@ -250,7 +250,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
-	if rf.role != Leader {
+	if rf.role != LEADER {
 		rf.mu.Unlock()
 		return
 	}
@@ -277,28 +277,28 @@ func (rf *Raft) sendHeartBeat(server int) {
 		var snapResp InstallSnapshotResponse
 		// 发送RPC请求。当不OK时，说明网络异常。
 		if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
-			snapResp.Info = NetworkFailure
+			snapResp.Info = NETWORK_FAILURE
 		}
 
 		rf.mu.Lock()
 		// 如果已经不为Leader，终止循环
-		if rf.role != Leader {
+		if rf.role != LEADER {
 			rf.mu.Unlock()
 			return
 		}
 
 		switch snapResp.Info {
-		case Success:
+		case SUCCESS:
 			rf.nextIndex[server] = rf.lastIncludedIndex+1
 
-		case TermOutdated:
+		case TERM_OUTDATED:
 			// term out-of-date, step down immediately
 			Debug(rf, "InstallSnapshot TermOutdated, step down")
-			rf.role = Follower
+			rf.role = FOLLOWER
 			rf.currentTerm = resp.ResponseTerm
 			rf.persist()
 
-		case NetworkFailure:
+		case NETWORK_FAILURE:
 			Debug(rf, "InstallSnapshot to %d timeout, retry", server)
 		}
 		rf.mu.Unlock()
@@ -307,20 +307,20 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 	// 发送RPC请求。当不OK时，说明网络异常。
 	if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
-		resp.Info = NetworkFailure
+		resp.Info = NETWORK_FAILURE
 	}
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.role != Leader {
+	if rf.role != LEADER {
 		return
 	}
 
 	switch resp.Info {
 
-	case Success:
+	case SUCCESS:
 		// update matchIndex and nextIndex
 		if n := req.PrevLogIndex + len(req.Entries); n > rf.matchIndex[server] {
 			rf.matchIndex[server] = req.PrevLogIndex + len(req.Entries)
@@ -331,13 +331,13 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		rf.leaderTryUpdateCommitIndex()
 
-	case TermOutdated:
+	case TERM_OUTDATED:
 		Debug(rf, "AppendEntries TermOutdated, step down")
 		rf.currentTerm = resp.ResponseTerm
-		rf.role = Follower
+		rf.role = FOLLOWER
 		rf.persist()
 
-	case LogInconsistent:
+	case LOG_INCONSISTENT:
 		Debug(rf, "日志不同步 [Server %d]", server)
 
 		// if ConflictTerm == -1
@@ -357,7 +357,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 			}
 		}
 
-	case NetworkFailure:
+	case NETWORK_FAILURE:
 		Debug(rf, "Heartbeat to %d timeout", server)
 	}
 	/*-----------------------------------------*/

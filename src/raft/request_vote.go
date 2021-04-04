@@ -14,7 +14,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	if req.CandidateTerm < rf.currentTerm {
 		Debug(rf, "reject VoteRequest from %d, my term is newer", req.CandidateId)
 
-		resp.Info = TermOutdated
+		resp.Info = TERM_OUTDATED
 		rf.mu.Unlock()
 		return
 	}
@@ -31,16 +31,16 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	// set currentTerm = T, convert to follower (§5.1)
 	if req.CandidateTerm > rf.currentTerm {
 		rf.currentTerm = req.CandidateTerm
-		rf.votedFor = NoVote
+		rf.votedFor = -1
 		rf.persist()
-		rf.role = Follower
+		rf.role = FOLLOWER
 	}
 
 	// if already voted, reject
-	if rf.votedFor != NoVote && rf.votedFor != req.CandidateId {
+	if rf.votedFor != -1 && rf.votedFor != req.CandidateId {
 		Debug(rf, "reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
 
-		resp.Info = Rejected
+		resp.Info = VOTE_REJECTED
 		rf.mu.Unlock()
 		return
 	}
@@ -49,7 +49,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	if lastTerm > req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex > req.LastLogIndex) {
 		Debug(rf, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
 
-		resp.Info = Rejected
+		resp.Info = VOTE_REJECTED
 		rf.mu.Unlock()
 		return
 	}
@@ -59,7 +59,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 	rf.votedFor = req.CandidateId
 	rf.persist()
 
-	resp.Info = Granted
+	resp.Info = VOTE_GRANTED
 	rf.resetTrigger()
 	rf.mu.Unlock()
 	/*-----------------------------------------*/
@@ -68,7 +68,7 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 func (rf *Raft) sendRequestVote(server int, st int64) {
 
 	rf.mu.Lock()
-	if rf.role != Candidate {
+	if rf.role != CANDIDATE {
 		rf.mu.Unlock()
 		return
 	}
@@ -95,7 +95,7 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 	// 发送RPC请求。当不OK时，说明网络异常。
 	if ok := rf.peers[server].Call("Raft.RequestVoteHandler", &req, &resp); !ok {
-		resp.Info = NetworkFailure
+		resp.Info = NETWORK_FAILURE
 	}
 
 
@@ -104,12 +104,12 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 	defer rf.mu.Unlock()
 
 	// 在RPC返回时，有可能已经退回到Follower或者获选为Leader了。
-	if rf.role != Candidate {
+	if rf.role != CANDIDATE {
 		return
 	}
 
 	switch resp.Info {
-	case Granted: // 获得投票
+	case VOTE_GRANTED: // 获得投票
 
 		// 在获得这张投票时，自己的任期已经更新了，则选票无效。
 		if rf.currentTerm != req.CandidateTerm {
@@ -120,12 +120,12 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 		if rf.votes > rf.size/2 { // 获得当前任期的大多数选票
 			// 已经成为Leader了
-			if rf.role == Leader {
+			if rf.role == LEADER {
 				return
 			}
 
 			// 获选Leader
-			rf.role = Leader
+			rf.role = LEADER
 			Debug(rf, "#####LEADER ELECTED! votes=%d, Term=%d#####", rf.votes, rf.currentTerm)
 
 			// reinitialize volatile status after election
@@ -159,7 +159,7 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 		}
 
-	case TermOutdated: // 发送RPC时的任期过期
+	case TERM_OUTDATED: // 发送RPC时的任期过期
 		// 有可能现在的任期是最新的
 		if rf.currentTerm >= resp.ResponseTerm {
 			return
@@ -167,17 +167,17 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 		// 更新任期，回退Follower
 		rf.currentTerm = resp.ResponseTerm
-		rf.role = Follower
+		rf.role = FOLLOWER
 		rf.persist()
 		Debug(rf, "term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
 
 		// 结束定时器
 		rf.closeTrigger(st)
 
-	case Rejected:
+	case VOTE_REJECTED:
 		Debug(rf, "VoteRequest to server %d is rejected", server)
 
-	case NetworkFailure:
+	case NETWORK_FAILURE:
 		Debug(rf, "VoteRequest to server %d timeout", server)
 	}
 	/*-----------------------------------------*/

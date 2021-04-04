@@ -103,7 +103,7 @@ func (rf *Raft) GetState() (int, bool) {
 	var isLeader bool
 
 	term = rf.currentTerm
-	isLeader = rf.role == Leader
+	isLeader = rf.role == LEADER
 
 	return term, isLeader
 	/*-----------------------------------------*/
@@ -119,7 +119,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	var isLeader bool
 
 	switch rf.role {
-	case Leader:
+	case LEADER:
 		Debug(rf, "### LEADER RECEIVES COMMAND ###")
 
 		if len(rf.logs) > 0 {
@@ -166,11 +166,11 @@ func (rf *Raft) mainLoop() {
 		rf.mu.Unlock()
 		/*-----------------------------------------*/
 		switch r {
-		case Follower:
+		case FOLLOWER:
 			rf.followerLoop()
-		case Candidate:
+		case CANDIDATE:
 			rf.candidateLoop()
-		case Leader:
+		case LEADER:
 			rf.leaderLoop()
 		}
 	}
@@ -183,7 +183,7 @@ func (rf *Raft) followerLoop() {
 		rf.mu.Lock()
 
 		// set a new Trigger and kick off
-		timeout := (TimerBase + time.Duration(rand.Intn(TimerRange))) * time.Millisecond
+		timeout := (TIMER_BASE + time.Duration(rand.Intn(TIMER_RANGE))) * time.Millisecond
 		rf.trigger = NewTrigger()
 		// Debug(rf, "reset timer=%+v, startTime=%+v", timeout, rf.trigger.StartTime)
 		go rf.elapseTrigger(timeout, rf.trigger.StartTime)
@@ -198,7 +198,7 @@ func (rf *Raft) followerLoop() {
 		switch {
 		case rf.trigger.Elapsed: // timer naturally elapses, turns to Candidate
 			Debug(rf, "Follower turns to Candidate, timeout=%+v", timeout)
-			rf.role = Candidate
+			rf.role = CANDIDATE
 			rf.trigger = nil
 			rf.currentTerm++    // increment currentTerm
 			rf.votedFor = rf.me // vote for self
@@ -207,7 +207,7 @@ func (rf *Raft) followerLoop() {
 			rf.mu.Unlock()
 			return
 		default: // stays as Follower, set a new Trigger in the next round
-			rf.role = Follower
+			rf.role = FOLLOWER
 			rf.trigger = nil
 		}
 		rf.mu.Unlock()
@@ -222,13 +222,13 @@ func (rf *Raft) candidateLoop() {
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
-		if rf.role != Candidate {
+		if rf.role != CANDIDATE {
 			rf.mu.Unlock()
 			return
 		}
 
 		// set a new Trigger and kick off
-		timeout := TimerBase*time.Millisecond + time.Duration(rand.Intn(TimerRange))*time.Millisecond
+		timeout := TIMER_BASE*time.Millisecond + time.Duration(rand.Intn(TIMER_RANGE))*time.Millisecond
 		rf.trigger = NewTrigger()
 		// Debug(rf, "candidate timer=%+v, term=%d", timeout, rf.currentTerm)
 		go rf.elapseTrigger(timeout, rf.trigger.StartTime)
@@ -252,7 +252,7 @@ func (rf *Raft) candidateLoop() {
 		// 进入下一次循环前判断是否角色产生变化
 		rf.mu.Lock()
 		rf.trigger = nil
-		if rf.role != Candidate {
+		if rf.role != CANDIDATE {
 			rf.mu.Unlock()
 			return
 		}
@@ -273,7 +273,7 @@ func (rf *Raft) leaderLoop() {
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
-		if rf.role != Leader {
+		if rf.role != LEADER {
 			rf.mu.Unlock()
 			return
 		}
@@ -290,7 +290,7 @@ func (rf *Raft) leaderLoop() {
 		}
 
 		// after sending heartbeats, sleep Leader for a while
-		sleeper := time.NewTimer(HeartBeatInterval * time.Millisecond)
+		sleeper := time.NewTimer(HEARTBEAT_INTERVAL * time.Millisecond)
 		<-sleeper.C
 	}
 }

@@ -1,25 +1,25 @@
 package kvraft
 
-import "6.824/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"sync/atomic"
+
+	"6.824/labrpc"
+)
 
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
+	size int
+	ClerkId
+	recentLeader int
 	// You will have to modify this struct.
-}
-
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.size = len(servers)
+	ck.Uid = nrand()
 	// You'll have to add code here.
 	return ck
 }
@@ -38,8 +38,37 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 //
 func (ck *Clerk) Get(key string) string {
 
-	// You will have to modify this function.
-	return ""
+	var req GetRequest
+	var resp GetResponse
+
+	req.Uid = ck.Uid
+	req.Key = key
+	req.Seq = atomic.AddInt64(&ck.Seq, 1)
+	
+	i := ck.recentLeader
+
+	for {
+		if ok := ck.servers[i].Call("KVServer.Get", &req, &resp); !ok {
+			resp.RPCInfo = NETWORK_FAILURE
+		}
+
+		switch resp.RPCInfo {
+		case NETWORK_FAILURE:
+			i = (i + 1) % ck.size
+
+		case WRONG_LEADER:
+			i = (i + 1) % ck.size
+
+		case SUCCESS:
+			ck.recentLeader = i
+			return resp.Value
+
+		case FAILED_REQUEST:
+			i = (i + 1) % ck.size
+
+		}
+
+	}
 }
 
 //
@@ -53,7 +82,42 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
+
+	var req PutAppendRequest
+	var resp PutAppendResponse
+
+	req.Uid = ck.Uid
+	req.Key = key
+	req.Value = value
+	req.OpType = OpType(op)
+	req.Seq = atomic.AddInt64(&ck.Seq, 1)
+	
+	i := ck.recentLeader
+
+	for {
+		if ok := ck.servers[i].Call("KVServer.PutAppend", &req, &resp); !ok {
+			resp.RPCInfo = NETWORK_FAILURE
+		}
+
+		switch resp.RPCInfo {
+		case NETWORK_FAILURE:
+			i = (i + 1) % ck.size
+
+		case WRONG_LEADER:
+			i = (i + 1) % ck.size
+
+		case SUCCESS:
+			return
+
+		case FAILED_REQUEST:
+			i = (i + 1) % ck.size
+
+		case DUPLICATE_REQUEST:
+			i = (i + 1) % ck.size
+
+		}
+
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {

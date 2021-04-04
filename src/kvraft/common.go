@@ -1,33 +1,62 @@
 package kvraft
 
+type (
+	RPCInfo int
+	OpType  string
+)
+
 const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongLeader = "ErrWrongLeader"
+	GET    OpType = "Get"
+	PUT    OpType = "Put"
+	APPEND OpType = "Append"
+
+	SUCCESS           RPCInfo = 0
+	NETWORK_FAILURE   RPCInfo = 1
+	WRONG_LEADER      RPCInfo = 2
+	FAILED_REQUEST    RPCInfo = 3
+	DUPLICATE_REQUEST RPCInfo = 4
 )
 
 type Err string
 
-// Put or Append
-type PutAppendArgs struct {
+type ClerkId struct {
+	Uid int64
+	Seq int64
+}
+
+//
+type PutAppendRequest struct {
 	Key   string
 	Value string
-	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	OpType
+	ClerkId
 }
 
-type PutAppendReply struct {
-	Err Err
+type PutAppendResponse struct {
+	RPCInfo
+	ValidLeader int
 }
 
-type GetArgs struct {
+type GetRequest struct {
 	Key string
-	// You'll have to add definitions here.
+	ClerkId
 }
 
-type GetReply struct {
-	Err   Err
+type GetResponse struct {
+	RPCInfo
+	ValidLeader int
+	Value       string
+}
+
+type RaftRequest struct {
+	Key   string
 	Value string
+	OpType
+	ClerkId
+}
+
+type RaftResponse struct {
+	Value string
+	OpType
+	RPCInfo
 }
