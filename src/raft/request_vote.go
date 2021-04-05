@@ -1,6 +1,5 @@
 package raft
 
-
 // RequestVoteHandler is the RPC handler for RequestVote
 // Candidate to Follower/Candidate/Stale Leader
 func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteResponse) {
@@ -98,7 +97,6 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 		resp.Info = NETWORK_FAILURE
 	}
 
-
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -130,9 +128,15 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 			// reinitialize volatile status after election
 			// 空日志返回索引0
-			entry, _ := rf.lastLogInfo()
-			lastLogIndex := entry.Index
+			var lastLogIndex int
 
+			if len(rf.logs) != 0 {
+				lastLogIndex = rf.logs[len(rf.logs)-1].Index
+			} else if rf.lastIncludedIndex != -1 {
+				lastLogIndex = rf.lastIncludedIndex
+			} else {
+				lastLogIndex = 0
+			}
 			// 当选时，自动填充一个空 LogEntry
 			// lastLogIndex++
 			// rf.logs = append(rf.logs, LogEntry{

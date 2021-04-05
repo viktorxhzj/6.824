@@ -9,12 +9,15 @@ const (
 	GET    OpType = "Get"
 	PUT    OpType = "Put"
 	APPEND OpType = "Append"
+	NIL    OpType = "NIL"
 
 	SUCCESS           RPCInfo = 0
 	NETWORK_FAILURE   RPCInfo = 1
 	WRONG_LEADER      RPCInfo = 2
 	FAILED_REQUEST    RPCInfo = 3
 	DUPLICATE_REQUEST RPCInfo = 4
+
+	NO_OP_INTERVAL = 1000
 )
 
 type Err string
@@ -34,7 +37,6 @@ type PutAppendRequest struct {
 
 type PutAppendResponse struct {
 	RPCInfo
-	ValidLeader int
 }
 
 type GetRequest struct {
@@ -44,8 +46,7 @@ type GetRequest struct {
 
 type GetResponse struct {
 	RPCInfo
-	ValidLeader int
-	Value       string
+	Value string
 }
 
 type RaftRequest struct {
@@ -53,6 +54,7 @@ type RaftRequest struct {
 	Value string
 	OpType
 	ClerkId
+	PossibleLeader int
 }
 
 type RaftResponse struct {

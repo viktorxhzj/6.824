@@ -52,4 +52,7 @@ func registerRPCs() {
 
 	labgob.Register(raft.InstallSnapshotRequest{})
 	labgob.Register(raft.InstallSnapshotResponse{})
+
+	labgob.Register(RaftRequest{})
+	labgob.Register(RaftResponse{})
 }

@@ -40,7 +40,7 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	} else if sliIdx == -1 && rf.lastIncludedIndex == req.LastIncludedIndex && rf.lastIncludedTerm == req.LastIncludedTerm {
 		Debug(rf, "已存在相同快照")
 		return
-	} 
+	}
 	rf.logs = []LogEntry{}
 	Debug(rf, "向service发送信息")
 	msg := ApplyMsg{
@@ -48,8 +48,8 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 		// For 2D:
 		SnapshotValid: true,
 		Snapshot:      req.Snapshot.Data,
-		SnapshotIndex:  req.LastIncludedIndex,
-		SnapshotTerm: req.LastIncludedTerm,
+		SnapshotIndex: req.LastIncludedIndex,
+		SnapshotTerm:  req.LastIncludedTerm,
 	}
 	rf.applyChan <- msg
 }
@@ -94,7 +94,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	rf.lastIncludedIndex = index
 	rf.lastIncludedTerm = rf.logs[sliIdx].Term
-	rf.offset = index+1
+	rf.offset = index + 1
 
 	s := Snapshot{
 		LastIncludedIndex: rf.lastIncludedIndex,

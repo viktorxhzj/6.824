@@ -20,7 +20,6 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	// reset the Trigger
 	rf.resetTrigger()
 
-
 	// If RPC request or response contains term T > currentTerm:
 	// set currentTerm = T, convert to follower (§5.1)
 	if req.LeaderTerm > rf.currentTerm {
@@ -48,7 +47,7 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		// entirely different from the beginning
 
 	case sliceIdx == -1 && req.PrevLogIndex == rf.lastIncludedIndex:
-		
+
 	case sliceIdx < 0:
 		panic("NOT EXISTS")
 
@@ -144,7 +143,7 @@ outer:
 
 				switch snapResp.Info {
 				case SUCCESS:
-					rf.nextIndex[server] = rf.lastIncludedIndex+1
+					rf.nextIndex[server] = rf.lastIncludedIndex + 1
 					rf.mu.Unlock()
 					continue outer
 
@@ -289,7 +288,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		switch snapResp.Info {
 		case SUCCESS:
-			rf.nextIndex[server] = rf.lastIncludedIndex+1
+			rf.nextIndex[server] = rf.lastIncludedIndex + 1
 
 		case TERM_OUTDATED:
 			// term out-of-date, step down immediately

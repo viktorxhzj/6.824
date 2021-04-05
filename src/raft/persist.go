@@ -39,7 +39,6 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(data)
 }
 
-
 type SnapshotBunk struct {
 	Entries []Snapshot
 }

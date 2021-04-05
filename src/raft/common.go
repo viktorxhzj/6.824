@@ -3,14 +3,15 @@ package raft
 import "fmt"
 
 type (
-	RPCInfo    int
-	MsgType    int
+	RPCInfo int
+	MsgType int
 )
 
 const (
 	TIMER_BASE         = 200
 	TIMER_RANGE        = 300
-	HEARTBEAT_INTERVAL = 150
+	HEARTBEAT_INTERVAL = 100
+	APPLY_INTERVAL     = 10
 
 	FOLLOWER  = 0
 	CANDIDATE = 1
@@ -20,7 +21,7 @@ const (
 	TERM_OUTDATED   RPCInfo = 0
 	NETWORK_FAILURE RPCInfo = 1
 	// AppendEntries
-	SUCCESS         RPCInfo = 2
+	SUCCESS          RPCInfo = 2
 	LOG_INCONSISTENT RPCInfo = 3
 	// RequestVote
 	VOTE_GRANTED  RPCInfo = 4
@@ -115,9 +116,9 @@ func (l LogEntry) String() string {
 }
 
 type Snapshot struct {
-	Data []byte
+	Data              []byte
 	LastIncludedIndex int
-	LastIncludedTerm int
+	LastIncludedTerm  int
 }
 
 func (s Snapshot) String() string {
@@ -126,12 +127,12 @@ func (s Snapshot) String() string {
 
 type InstallSnapshotRequest struct {
 	LeaderTerm int
-	LeaderId int
+	LeaderId   int
 	Snapshot
 }
 
 type InstallSnapshotResponse struct {
-	ResponseId    int
-	ResponseTerm  int
-	Info          RPCInfo
+	ResponseId   int
+	ResponseTerm int
+	Info         RPCInfo
 }

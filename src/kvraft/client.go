@@ -6,10 +6,9 @@ import (
 	"6.824/labrpc"
 )
 
-
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	size int
+	size    int
 	ClerkId
 	recentLeader int
 	// You will have to modify this struct.
@@ -44,9 +43,10 @@ func (ck *Clerk) Get(key string) string {
 	req.Uid = ck.Uid
 	req.Key = key
 	req.Seq = atomic.AddInt64(&ck.Seq, 1)
-	
+
 	i := ck.recentLeader
 
+	Debug("开始GET [%d]", atomic.LoadInt64(&ck.Seq))
 	for {
 		if ok := ck.servers[i].Call("KVServer.Get", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -61,13 +61,16 @@ func (ck *Clerk) Get(key string) string {
 
 		case SUCCESS:
 			ck.recentLeader = i
+			Debug("成功GET [%d]", atomic.LoadInt64(&ck.Seq))
 			return resp.Value
 
 		case FAILED_REQUEST:
 			i = (i + 1) % ck.size
 
 		}
-
+		resp.Value = ""
+		resp.RPCInfo = 0
+		Debug("Clerk重试")
 	}
 }
 
@@ -91,9 +94,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	req.Value = value
 	req.OpType = OpType(op)
 	req.Seq = atomic.AddInt64(&ck.Seq, 1)
-	
+
 	i := ck.recentLeader
 
+	Debug("开始PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
 	for {
 		if ok := ck.servers[i].Call("KVServer.PutAppend", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -107,16 +111,21 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			i = (i + 1) % ck.size
 
 		case SUCCESS:
+			ck.recentLeader = i
+			Debug("成功PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
 			return
 
 		case FAILED_REQUEST:
 			i = (i + 1) % ck.size
 
 		case DUPLICATE_REQUEST:
-			i = (i + 1) % ck.size
+			Debug("幂等性校验未通过")
+			return
 
 		}
 
+		resp.RPCInfo = 0
+		Debug("Clerk重试 %+v", req)
 	}
 }
 

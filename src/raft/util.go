@@ -90,7 +90,6 @@ func (rf *Raft) lastLogInfo() (LogEntry, bool) {
 	return rf.logs[len(rf.logs)-1], true
 }
 
-
 func TimerForTest(c chan int) {
 	var t int
 	var s string

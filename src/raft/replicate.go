@@ -20,7 +20,7 @@ func (rf *Raft) replicateLoop() {
 func (rf *Raft) applyLoop() {
 	for !rf.killed() {
 		rf.batchApply()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(APPLY_INTERVAL * time.Millisecond)
 	}
 }
 
@@ -73,7 +73,7 @@ func (rf *Raft) batchApply() {
 	}
 	for rf.commitIndex > rf.lastAppliedIndex {
 		rf.lastAppliedIndex++
-		idx := rf.lastAppliedIndex-rf.offset
+		idx := rf.lastAppliedIndex - rf.offset
 		if idx < 0 {
 			continue
 		}

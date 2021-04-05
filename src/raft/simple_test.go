@@ -1,11 +1,11 @@
 package raft
 
 import (
-	"testing"
 	"fmt"
+	"testing"
 )
 
-func TestWhat(t *testing.T)  {
+func TestWhat(t *testing.T) {
 	s := []int{1, 2, 3}
 	fmt.Println(s[:0])
 }

@@ -23,12 +23,12 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	// persistent status
-	currentTerm int // init 0
-	votedFor    int
-	logs        []LogEntry
-	offset      int
+	currentTerm       int // init 0
+	votedFor          int
+	logs              []LogEntry
+	offset            int
 	lastIncludedIndex int
-	lastIncludedTerm int
+	lastIncludedTerm  int
 
 	// volatile status
 	commitIndex      int
@@ -57,7 +57,6 @@ type Raft struct {
 func (rf *Raft) String() string {
 	return fmt.Sprintf("[NODE %d] term=%d,commitIdx=%d", rf.me, rf.currentTerm, rf.commitIndex)
 }
-
 
 // Make creates a pointer to a Raft Node.
 func Make(peers []*labrpc.ClientEnd, me int,
@@ -245,7 +244,7 @@ func (rf *Raft) candidateLoop() {
 		}
 
 		// 并发发送 RequestVote RPCs
-		
+
 		rf.trigger.Wait()
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
