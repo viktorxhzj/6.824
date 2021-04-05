@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"6.824/labrpc"
@@ -19,7 +20,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.servers = servers
 	ck.size = len(servers)
 	ck.Uid = nrand()
-	// You'll have to add code here.
+	fmt.Println("NEW CLIENT", ck.Uid)
 	return ck
 }
 
@@ -46,7 +47,7 @@ func (ck *Clerk) Get(key string) string {
 
 	i := ck.recentLeader
 
-	Debug("开始GET [%d]", atomic.LoadInt64(&ck.Seq))
+	CDebug(ck.Uid, "开始GET [%d]", atomic.LoadInt64(&ck.Seq))
 	for {
 		if ok := ck.servers[i].Call("KVServer.Get", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -61,7 +62,7 @@ func (ck *Clerk) Get(key string) string {
 
 		case SUCCESS:
 			ck.recentLeader = i
-			Debug("成功GET [%d]", atomic.LoadInt64(&ck.Seq))
+			CDebug(ck.Uid, "成功GET [%d]", atomic.LoadInt64(&ck.Seq))
 			return resp.Value
 
 		case FAILED_REQUEST:
@@ -70,7 +71,7 @@ func (ck *Clerk) Get(key string) string {
 		}
 		resp.Value = ""
 		resp.RPCInfo = 0
-		Debug("Clerk重试")
+		CDebug(ck.Uid, "Clerk重试 [%d]", atomic.LoadInt64(&ck.Seq))
 	}
 }
 
@@ -97,7 +98,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	i := ck.recentLeader
 
-	Debug("开始PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
+	CDebug(ck.Uid, "开始PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
 	for {
 		if ok := ck.servers[i].Call("KVServer.PutAppend", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -112,20 +113,20 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		case SUCCESS:
 			ck.recentLeader = i
-			Debug("成功PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
+			CDebug(ck.Uid, "成功PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
 			return
 
 		case FAILED_REQUEST:
 			i = (i + 1) % ck.size
 
 		case DUPLICATE_REQUEST:
-			Debug("幂等性校验未通过")
+			CDebug(ck.Uid, "幂等性校验未通过")
 			return
 
 		}
 
 		resp.RPCInfo = 0
-		Debug("Clerk重试 %+v", req)
+		CDebug(ck.Uid, "Clerk重试 [%d]", atomic.LoadInt64(&ck.Seq))
 	}
 }
 

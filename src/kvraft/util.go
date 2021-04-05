@@ -1,12 +1,18 @@
 package kvraft
 
 import (
-	"crypto/rand"
-	"math/big"
+	//"crypto/rand"
+	//"math/big"
+	"fmt"
 	"sync/atomic"
+	"time"
 
 	"6.824/labgob"
 	"6.824/raft"
+)
+
+var (
+	NN int64
 )
 
 //
@@ -31,10 +37,11 @@ func (kv *KVServer) killed() bool {
 }
 
 func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
+	// max := big.NewInt(int64(1) << 62)
+	// bigx, _ := rand.Int(rand.Reader, max)
+	// x := bigx.Int64()
+	// return x
+	return atomic.AddInt64(&NN, 1)
 }
 
 func registerRPCs() {
@@ -55,4 +62,24 @@ func registerRPCs() {
 
 	labgob.Register(RaftRequest{})
 	labgob.Register(RaftResponse{})
+}
+
+func TimerForTest(c chan int) {
+	var t int
+	var s string
+outer:
+	for {
+		select {
+		case <-c:
+			break outer
+		default:
+			t++
+			s += "*"
+			time.Sleep(time.Second)
+		}
+		fmt.Printf("%02d second %s\n", t, s)
+		if t >= 100 {
+			panic("panic_too_long")
+		}
+	}
 }

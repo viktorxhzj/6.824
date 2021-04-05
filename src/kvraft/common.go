@@ -54,7 +54,6 @@ type RaftRequest struct {
 	Value string
 	OpType
 	ClerkId
-	PossibleLeader int
 }
 
 type RaftResponse struct {

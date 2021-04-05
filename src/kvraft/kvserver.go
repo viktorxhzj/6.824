@@ -25,10 +25,9 @@ type KVServer struct {
 
 func (kv *KVServer) Get(req *GetRequest, resp *GetResponse) {
 	r := RaftRequest{
-		Key:            req.Key,
-		ClerkId:        req.ClerkId,
-		OpType:         GET,
-		PossibleLeader: kv.me,
+		Key:     req.Key,
+		ClerkId: req.ClerkId,
+		OpType:  GET,
 	}
 
 	rr := kv.result(r)
@@ -39,11 +38,10 @@ func (kv *KVServer) Get(req *GetRequest, resp *GetResponse) {
 
 func (kv *KVServer) PutAppend(req *PutAppendRequest, resp *PutAppendResponse) {
 	r := RaftRequest{
-		Key:            req.Key,
-		Value:          req.Value,
-		ClerkId:        req.ClerkId,
-		OpType:         req.OpType,
-		PossibleLeader: kv.me,
+		Key:     req.Key,
+		Value:   req.Value,
+		ClerkId: req.ClerkId,
+		OpType:  req.OpType,
 	}
 
 	rr := kv.result(r)
@@ -98,6 +96,8 @@ func (kv *KVServer) result(r RaftRequest) RaftResponse {
 	var idx, term int
 	var ok bool
 
+	kv.mu.Lock()
+
 	if r.OpType == NIL {
 		idx, term, ok = kv.rf.Start(nil)
 
@@ -106,12 +106,12 @@ func (kv *KVServer) result(r RaftRequest) RaftResponse {
 	}
 
 	if !ok {
+		kv.mu.Unlock()
 		return RaftResponse{RPCInfo: WRONG_LEADER, OpType: r.OpType}
 	}
 
 	ch := make(chan RaftResponse)
-
-	kv.mu.Lock()
+	Debug(kv.me, "开启通道[%d|%d]%+v", idx, term, ch)
 	if mm := kv.distro[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
 		kv.distro[idx] = mm
@@ -138,6 +138,7 @@ func (kv *KVServer) executeLoop() {
 
 		idx, term := msg.CommandIndex, msg.CommandTerm
 		r, ok := msg.Command.(RaftRequest)
+		Debug(kv.me, "收到日志[%d|%d]", idx, term)
 		// No-op
 		if !ok {
 			kv.mu.Lock()
@@ -146,6 +147,7 @@ func (kv *KVServer) executeLoop() {
 				v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: r.OpType}
 			}
 			delete(kv.distro, idx)
+			// Debug(int64(kv.me), "No-Op清除idx=%d", idx)
 			kv.mu.Unlock()
 			continue
 		}
@@ -176,11 +178,7 @@ func (kv *KVServer) executeLoop() {
 			mm := kv.distro[idx]
 			for k, v := range mm {
 				if k == term {
-					if r.PossibleLeader == kv.me {
-						v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: GET}
-					} else {
-						v <- RaftResponse{RPCInfo: WRONG_LEADER, OpType: GET}
-					}
+					v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: GET}
 				} else {
 					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: GET}
 				}
@@ -194,11 +192,7 @@ func (kv *KVServer) executeLoop() {
 			mm := kv.distro[idx]
 			for k, v := range mm {
 				if k == term {
-					if r.PossibleLeader == kv.me {
-						v <- RaftResponse{RPCInfo: SUCCESS, OpType: PUT}
-					} else {
-						v <- RaftResponse{RPCInfo: WRONG_LEADER, OpType: PUT}
-					}
+					v <- RaftResponse{RPCInfo: SUCCESS, OpType: PUT}
 				} else {
 					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: PUT}
 				}
@@ -212,11 +206,7 @@ func (kv *KVServer) executeLoop() {
 			mm := kv.distro[idx]
 			for k, v := range mm {
 				if k == term {
-					if r.PossibleLeader == kv.me {
-						v <- RaftResponse{RPCInfo: SUCCESS, OpType: APPEND}
-					} else {
-						v <- RaftResponse{RPCInfo: WRONG_LEADER, OpType: APPEND}
-					}
+					v <- RaftResponse{RPCInfo: SUCCESS, OpType: APPEND}
 				} else {
 					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: APPEND}
 				}
@@ -239,6 +229,9 @@ func (kv *KVServer) noopLoop() {
 		}
 
 		kv.result(r)
+		kv.mu.Lock()
+		Debug(kv.me, "Distro %+v", kv.distro)
+		kv.mu.Unlock()
 
 	}
 }
