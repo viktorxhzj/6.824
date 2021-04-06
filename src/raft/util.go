@@ -65,10 +65,6 @@ func (rf *Raft) resetTrigger() {
 	}
 }
 
-func (rf *Raft) printLog() {
-	Debug(rf, "AppendEntries returns")
-}
-
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 }
@@ -76,18 +72,6 @@ func (rf *Raft) Kill() {
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
-}
-
-// lastLogInfo 返回最后一个日志行的信息。
-// 调用者在临界区内，不上锁。
-// 如果日志为空，返回 ZeroLogEntry 。
-func (rf *Raft) lastLogInfo() (LogEntry, bool) {
-
-	if len(rf.logs) == 0 {
-		return ZeroLogEntry, false
-	}
-
-	return rf.logs[len(rf.logs)-1], true
 }
 
 func TimerForTest(c chan int) {

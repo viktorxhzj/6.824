@@ -68,9 +68,6 @@ func (rf *Raft) receiverTryUpdateCommitIndex(req *AppendEntriesRequest) {
 func (rf *Raft) batchApply() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.commitIndex > rf.lastAppliedIndex {
-		//Debug(rf, "batch apply range %d -> %d", rf.lastAppliedIndex+1, rf.commitIndex)
-	}
 	for rf.commitIndex > rf.lastAppliedIndex {
 		rf.lastAppliedIndex++
 		idx := rf.lastAppliedIndex - rf.offset

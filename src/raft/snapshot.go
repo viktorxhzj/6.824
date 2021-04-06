@@ -36,7 +36,7 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	if sliIdx >= 0 && sliIdx < len(rf.logs)-1 && rf.logs[sliIdx].Index == rf.lastIncludedIndex && rf.logs[sliIdx].Term == rf.lastIncludedTerm {
 		rf.logs = rf.logs[sliIdx+1:]
 		Debug(rf, "快照没有覆盖所有日志")
-		return
+
 	} else if sliIdx == -1 && rf.lastIncludedIndex == req.LastIncludedIndex && rf.lastIncludedTerm == req.LastIncludedTerm {
 		Debug(rf, "已存在相同快照")
 		return

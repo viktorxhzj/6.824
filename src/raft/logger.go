@@ -25,7 +25,7 @@ func Debug(rf *Raft, format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%s Apply=%d,Commit=%d,Term=%d,Off=%d, {...=>[%d|%d]}",
+	str := fmt.Sprintf("%s App=%d,Com=%d,Term=%d,Off=%d,{...=>[%d|%d]}",
 		time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.offset, rf.lastIncludedIndex, rf.lastIncludedTerm)
 
 	if len(rf.logs) == 0 {

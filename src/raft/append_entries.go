@@ -49,7 +49,10 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	case sliceIdx == -1 && req.PrevLogIndex == rf.lastIncludedIndex:
 
 	case sliceIdx < 0:
-		panic("NOT EXISTS")
+		resp.Info = LOG_INCONSISTENT
+		resp.ConflictIndex = len(rf.logs) + rf.offset - 1
+		resp.ConflictTerm = -1
+		return
 
 	default:
 		// 2. reply false if the log doesn't contain an entry at prevLogIndex
@@ -131,7 +134,7 @@ outer:
 		// if needs snapshot, send InstallSnapshot RPC first
 		// then retry AppendEntries RPC
 		if needSnapshot := (len(rf.logs) == 0) || (pos < -1); needSnapshot {
-			Debug(rf, "[NODE %d] 需要快照", server)
+			Debug(rf, "[NODE %d] 需要快照，因为next=%+v", server, rf.nextIndex)
 			var snapReq InstallSnapshotRequest
 			var snapResp InstallSnapshotResponse
 
@@ -160,12 +163,13 @@ outer:
 			// here we set the nextIndex in a pessimistic view
 			case SUCCESS:
 				rf.nextIndex[server] = rf.lastIncludedIndex + 1
+				Debug(rf, "快照RPC->[NODE %d]成功，更新next=%+v", server, rf.nextIndex)
 				rf.mu.Unlock()
 				continue outer
 
 			// term is out of date, steps down immediately
 			case TERM_OUTDATED:
-				Debug(rf, "InstallSnapshot TermOutdated, step down")
+				Debug(rf, "快照RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 				rf.role = FOLLOWER
 				rf.currentTerm = snapResp.ResponseTerm
 				rf.persist()
@@ -175,7 +179,7 @@ outer:
 			// upon network_failure, retry AppendEntries RPC will still
 			// end up retrying InstallSnapshot RPC
 			case NETWORK_FAILURE:
-				Debug(rf, "InstallSnapshot to %d timeout, retry", server)
+				Debug(rf, "快照RPC->[NODE %d]超时", server)
 				rf.mu.Unlock()
 				continue outer
 			}
@@ -190,6 +194,9 @@ outer:
 		}
 		req.PrevLogIndex = prevLogIndex
 		req.Entries = rf.logs[pos+1:]
+		req.LeaderTerm = rf.currentTerm
+		req.LeaderId = rf.me
+		req.LeaderCommitIndex = rf.commitIndex
 
 		Debug(rf, "追加RPC-> [NODE %d] %+v", server, req)
 		rf.mu.Unlock()
@@ -220,14 +227,14 @@ outer:
 				rf.matchIndex[server] = n
 				rf.nextIndex[server] = rf.matchIndex[server] + 1
 			}
-			Debug(rf, "追加RPC->[NODE %d]成功, match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
+			Debug(rf, "追加RPC->[NODE %d]成功,更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
 			rf.leaderTryUpdateCommitIndex()
 			rf.mu.Unlock()
 			return
 
 		// term is out of date, steps down immediately
 		case TERM_OUTDATED:
-			Debug(rf, "AppendEntries TermOutdated, step down")
+			Debug(rf, "追加RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 			rf.role = FOLLOWER
 			rf.currentTerm = resp.ResponseTerm
 			rf.persist()
@@ -236,7 +243,6 @@ outer:
 
 		// we need to reduce PrevLogIndex to ultimately find the matching entry
 		case LOG_INCONSISTENT:
-			Debug(rf, "日志不同步 [Node %d]", server)
 
 			if resp.ConflictIndex == 0 {
 				rf.nextIndex[server] = 1
@@ -249,13 +255,16 @@ outer:
 			// if it finds an entry in its log with that term, it should set nextIndex to be the one
 			// beyond the index of the last entry in that term in its log
 			// if it does not find an entry with that term, it should set nextIndex = conflictIndex
-			if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
+			if len(rf.logs) == 0 {
+				rf.nextIndex[server] = resp.ConflictIndex
+			} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
 				rf.nextIndex[server] = rf.logs[idx-1].Index + 1
 			} else if rf.logs[idx].Term == resp.ConflictTerm {
 				rf.nextIndex[server] = rf.logs[idx].Index + 1
 			} else {
 				rf.nextIndex[server] = resp.ConflictIndex
 			}
+			Debug(rf, "追加RPC->[NODE %d]返回LogInconsistent，更新next=%+v", server, rf.nextIndex)
 			rf.mu.Unlock()
 
 		// upon network_failure, retry AppendEntries RPC
@@ -309,12 +318,13 @@ func (rf *Raft) sendHeartBeat(server int) {
 		// here we set the nextIndex in a pessimistic view
 		case SUCCESS:
 			rf.nextIndex[server] = rf.lastIncludedIndex + 1
+			Debug(rf, "快照RPC->[NODE %d]成功，更新next=%+v", server, rf.nextIndex)
 			rf.mu.Unlock()
 			return
 
 		// term is out of date, steps down immediately
 		case TERM_OUTDATED:
-			Debug(rf, "InstallSnapshot TermOutdated, step down")
+			Debug(rf, "快照RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 			rf.role = FOLLOWER
 			rf.currentTerm = snapResp.ResponseTerm
 			rf.persist()
@@ -324,7 +334,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 		// upon network_failure, retry AppendEntries RPC will still
 		// end up retrying InstallSnapshot RPC
 		case NETWORK_FAILURE:
-			Debug(rf, "InstallSnapshot to %d timeout, retry", server)
+			Debug(rf, "快照RPC->[NODE %d]超时", server)
 			rf.mu.Unlock()
 			return
 		}
@@ -342,6 +352,9 @@ func (rf *Raft) sendHeartBeat(server int) {
 	}
 	req.PrevLogIndex = prevLogIndex
 	req.Entries = rf.logs[pos+1:]
+	req.LeaderTerm = rf.currentTerm
+	req.LeaderId = rf.me
+	req.LeaderCommitIndex = rf.commitIndex
 
 	Debug(rf, "心跳RPC-> [NODE %d] %+v", server, req)
 	rf.mu.Unlock()
@@ -370,17 +383,16 @@ func (rf *Raft) sendHeartBeat(server int) {
 			rf.nextIndex[server] = rf.matchIndex[server] + 1
 		}
 
-		Debug(rf, "心跳RPC->[NODE %d]成功, match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
+		Debug(rf, "心跳RPC->[NODE %d]成功, 更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
 		rf.leaderTryUpdateCommitIndex()
 
 	case TERM_OUTDATED:
-		Debug(rf, "心跳RPC返回TermOutdated, step down")
+		Debug(rf, "心跳RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 		rf.currentTerm = resp.ResponseTerm
 		rf.role = FOLLOWER
 		rf.persist()
 
 	case LOG_INCONSISTENT:
-		Debug(rf, "日志不同步 [Server %d]", server)
 
 		if resp.ConflictIndex == 0 {
 			rf.nextIndex[server] = 1
@@ -389,7 +401,9 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		idx := rf.searchRightIndex(resp.ConflictTerm)
 
-		if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
+		if len(rf.logs) == 0 {
+			rf.nextIndex[server] = resp.ConflictIndex
+		} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
 			rf.nextIndex[server] = rf.logs[idx-1].Index + 1
 
 		} else if rf.logs[idx].Term == resp.ConflictTerm {
@@ -398,6 +412,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 		} else {
 			rf.nextIndex[server] = resp.ConflictIndex
 		}
+		Debug(rf, "心跳RPC->[NODE %d]返回LogInconsistent，更新next=%+v", server, rf.nextIndex)
 
 	case NETWORK_FAILURE:
 		Debug(rf, "心跳RPC->[NODE %d]超时", server)

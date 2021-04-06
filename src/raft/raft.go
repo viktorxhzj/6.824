@@ -136,9 +136,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		})
 		rf.persist()
 
-		Debug(rf, "Log after local append")
 		rf.matchIndex[rf.me] = index
 		rf.nextIndex[rf.me] = index + 1
+		Debug(rf, "更新match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 		rf.mu.Unlock()
 		// send a signal
