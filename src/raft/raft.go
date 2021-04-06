@@ -75,8 +75,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(peers))
 	rf.appendChan = make(chan int)
 	rf.offset = 1
-	rf.lastIncludedIndex = -1
-	rf.lastIncludedTerm = -1
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -123,10 +121,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 		if len(rf.logs) > 0 {
 			index = rf.logs[len(rf.logs)-1].Index + 1
-		} else if len(rf.logs) == 0 && rf.lastIncludedIndex != -1 {
-			index = rf.lastIncludedIndex + 1
 		} else {
-			index = 1
+			index = rf.lastIncludedIndex + 1
 		}
 		term = rf.currentTerm
 

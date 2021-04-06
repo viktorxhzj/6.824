@@ -132,10 +132,8 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 			if len(rf.logs) != 0 {
 				lastLogIndex = rf.logs[len(rf.logs)-1].Index
-			} else if rf.lastIncludedIndex != -1 {
-				lastLogIndex = rf.lastIncludedIndex
 			} else {
-				lastLogIndex = 0
+				lastLogIndex = rf.lastIncludedIndex
 			}
 			// 当选时，自动填充一个空 LogEntry
 			// lastLogIndex++
