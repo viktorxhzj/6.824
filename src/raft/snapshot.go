@@ -3,14 +3,14 @@ package raft
 func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *InstallSnapshotResponse) {
 
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	Debug(rf, "收获快照RPC %+v", *req)
-	defer Debug(rf, "快照RPC结束")
 
 	resp.ResponseTerm = rf.currentTerm
 
 	if req.LeaderTerm < rf.currentTerm {
 		resp.Info = TERM_OUTDATED
+		Debug(rf, "快照RPC结束")
+		rf.mu.Unlock()
 		return
 	}
 
@@ -28,6 +28,8 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	}
 
 	if rf.lastIncludedIndex >= req.LastIncludedIndex {
+		Debug(rf, "快照RPC结束")
+		rf.mu.Unlock()
 		return
 	}
 
@@ -43,10 +45,13 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 
 	} else if sliIdx == -1 && rf.lastIncludedIndex == req.LastIncludedIndex && rf.lastIncludedTerm == req.LastIncludedTerm {
 		Debug(rf, "已存在相同快照")
+		Debug(rf, "快照RPC结束")
+		rf.mu.Unlock()
 		return
 	} else {
 		rf.logs = []LogEntry{}
 	}
+	rf.persist()
 	Debug(rf, "向service发送信息")
 	msg := ApplyMsg{
 		CommandValid: false,
@@ -56,6 +61,8 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 		SnapshotIndex: req.LastIncludedIndex,
 		SnapshotTerm:  req.LastIncludedTerm,
 	}
+	Debug(rf, "快照RPC结束")
+	rf.mu.Unlock()
 	rf.applyChan <- msg
 }
 
@@ -94,7 +101,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	sliIdx := index - rf.offset
 
 	if sliIdx < 0 || sliIdx >= len(rf.logs) {
-		panic("Invalid snapshot index")
+		Debug(rf, "快照Index过期，无需快照")
+		return
 	}
 
 	rf.lastIncludedIndex = index
