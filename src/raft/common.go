@@ -28,10 +28,6 @@ const (
 	VOTE_REJECTED RPCInfo = 5
 )
 
-var (
-	ZeroLogEntry LogEntry = LogEntry{Index: 0, Term: 0}
-)
-
 //
 // used as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or

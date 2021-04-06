@@ -9,8 +9,8 @@ import (
 
 var (
 	EnableDebug   = 1
-	EnableConsole = 1
-	EnableFile    = 0
+	EnableConsole = 0
+	EnableFile    = 1
 )
 
 func Debug(node int, format string, info ...interface{}) {

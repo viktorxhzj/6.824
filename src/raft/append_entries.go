@@ -140,7 +140,7 @@ outer:
 
 			snapReq.LeaderId = rf.me
 			snapReq.LeaderTerm = rf.currentTerm
-			snapReq.Snapshot = rf.lastestSnapshot()
+			snapReq.Snapshot = rf.LastestSnapshot()
 			rf.mu.Unlock()
 			/*--------------------CRITICAL SECTION--------------------*/
 
@@ -246,7 +246,6 @@ outer:
 
 			if resp.ConflictIndex == 0 {
 				rf.nextIndex[server] = 1
-				panic("LOG_INCONSIST SHOULD NOT EXISTS")
 			}
 
 			idx := rf.searchRightIndex(resp.ConflictTerm)
@@ -295,7 +294,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		snapReq.LeaderId = rf.me
 		snapReq.LeaderTerm = rf.currentTerm
-		snapReq.Snapshot = rf.lastestSnapshot()
+		snapReq.Snapshot = rf.LastestSnapshot()
 		rf.mu.Unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 
@@ -396,7 +395,6 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		if resp.ConflictIndex == 0 {
 			rf.nextIndex[server] = 1
-			panic("LOG_INCONSIST SHOULD NOT EXISTS")
 		}
 
 		idx := rf.searchRightIndex(resp.ConflictTerm)

@@ -47,7 +47,7 @@ func (ck *Clerk) Get(key string) string {
 
 	i := ck.recentLeader
 
-	CDebug(ck.Uid, "开始GET [%d]", atomic.LoadInt64(&ck.Seq))
+	CDebug(ck.Uid, "开始GET%+v", req)
 	for {
 		if ok := ck.servers[i].Call("KVServer.Get", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -62,7 +62,7 @@ func (ck *Clerk) Get(key string) string {
 
 		case SUCCESS:
 			ck.recentLeader = i
-			CDebug(ck.Uid, "成功GET [%d]", atomic.LoadInt64(&ck.Seq))
+			CDebug(ck.Uid, "成功GET%+v", req)
 			return resp.Value
 
 		case FAILED_REQUEST:
@@ -70,8 +70,8 @@ func (ck *Clerk) Get(key string) string {
 
 		}
 		resp.Value = ""
-		resp.RPCInfo = 0
-		CDebug(ck.Uid, "Clerk重试 [%d]", atomic.LoadInt64(&ck.Seq))
+		resp.RPCInfo = ""
+		CDebug(ck.Uid, "Client重试 [%d]", atomic.LoadInt64(&ck.Seq))
 	}
 }
 
@@ -98,7 +98,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	i := ck.recentLeader
 
-	CDebug(ck.Uid, "开始PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
+	CDebug(ck.Uid, "开始PUTAPPEND%+v", req)
 	for {
 		if ok := ck.servers[i].Call("KVServer.PutAppend", &req, &resp); !ok {
 			resp.RPCInfo = NETWORK_FAILURE
@@ -113,7 +113,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		case SUCCESS:
 			ck.recentLeader = i
-			CDebug(ck.Uid, "成功PUTAPPEND [%d]", atomic.LoadInt64(&ck.Seq))
+			CDebug(ck.Uid, "成功PUTAPPEND%+v", req)
 			return
 
 		case FAILED_REQUEST:
@@ -125,8 +125,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		}
 
-		resp.RPCInfo = 0
-		CDebug(ck.Uid, "Clerk重试 [%d]", atomic.LoadInt64(&ck.Seq))
+		resp.RPCInfo = ""
+		CDebug(ck.Uid, "Client重试 [%d]", atomic.LoadInt64(&ck.Seq))
 	}
 }
 

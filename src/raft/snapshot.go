@@ -27,6 +27,10 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 		rf.role = FOLLOWER
 	}
 
+	if rf.lastIncludedIndex >= req.LastIncludedIndex {
+		return
+	}
+
 	rf.lastIncludedIndex = req.LastIncludedIndex
 	rf.lastIncludedTerm = req.LastIncludedTerm
 	sliIdx := rf.lastIncludedIndex - rf.offset
@@ -40,8 +44,9 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	} else if sliIdx == -1 && rf.lastIncludedIndex == req.LastIncludedIndex && rf.lastIncludedTerm == req.LastIncludedTerm {
 		Debug(rf, "已存在相同快照")
 		return
+	} else {
+		rf.logs = []LogEntry{}
 	}
-	rf.logs = []LogEntry{}
 	Debug(rf, "向service发送信息")
 	msg := ApplyMsg{
 		CommandValid: false,

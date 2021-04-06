@@ -6,19 +6,26 @@ import (
 	"6.824/labgob"
 )
 
+func (rf *Raft) ShouldSnapshot(maxSize int) bool {
+	return rf.persister.RaftStateSize() > maxSize
+}
+
 // Mono increasing for sure
 func (rf *Raft) persistStateAndSnapshot(s Snapshot) {
 	state, snap := rf.makeRaftStateBytes(), rf.makeSnapshotBytes(s)
 	rf.persister.SaveStateAndSnapshot(state, snap)
 }
 
-func (rf *Raft) lastestSnapshot() Snapshot {
+func (rf *Raft) LastestSnapshot() Snapshot {
 	data := rf.persister.ReadSnapshot()
+	if len(data) == 0 {
+		return Snapshot{}
+	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var bunk SnapshotBunk
-	if d.Decode(&bunk) != nil {
-		panic("快照列表读取失败")
+	if err := d.Decode(&bunk); err != nil {
+		panic(err)
 	}
 	if len(bunk.Entries) == 0 {
 		panic("无快照")

@@ -1,7 +1,9 @@
 package kvraft
 
+import "fmt"
+
 type (
-	RPCInfo int
+	RPCInfo string
 	OpType  string
 )
 
@@ -11,23 +13,25 @@ const (
 	APPEND OpType = "Append"
 	NIL    OpType = "NIL"
 
-	SUCCESS           RPCInfo = 0
-	NETWORK_FAILURE   RPCInfo = 1
-	WRONG_LEADER      RPCInfo = 2
-	FAILED_REQUEST    RPCInfo = 3
-	DUPLICATE_REQUEST RPCInfo = 4
+	SUCCESS           RPCInfo = "成功"
+	NETWORK_FAILURE   RPCInfo = "超时"
+	WRONG_LEADER      RPCInfo = "非法领袖"
+	FAILED_REQUEST    RPCInfo = "失败重试"
+	DUPLICATE_REQUEST RPCInfo = "幂等拦截"
 
-	NO_OP_INTERVAL = 1000
+	NO_OP_INTERVAL          = 1000
+	SIZE_DETECTION_INTERVAL = 2000
 )
-
-type Err string
 
 type ClerkId struct {
 	Uid int64
 	Seq int64
 }
 
-//
+func (c ClerkId) String() string {
+	return fmt.Sprintf("[CLI-%d SEQ-%d]", c.Uid, c.Seq)
+}
+
 type PutAppendRequest struct {
 	Key   string
 	Value string
@@ -56,8 +60,18 @@ type RaftRequest struct {
 	ClerkId
 }
 
+func (r RaftRequest) String() string {
+	return fmt.Sprintf("%+v [%+v K:%s V:%s]", r.ClerkId, r.OpType, r.Key, r.Value)
+}
+
 type RaftResponse struct {
+	Key   string
 	Value string
 	OpType
 	RPCInfo
+	ClerkId
+}
+
+func (r RaftResponse) String() string {
+	return fmt.Sprintf("%+v [%+v K:%s V:%s] %+v", r.ClerkId, r.OpType, r.Key, r.Value, r.RPCInfo)
 }

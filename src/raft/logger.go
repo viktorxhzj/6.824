@@ -10,9 +10,9 @@ var (
 	File          *os.File
 	Prefix        = "../logs/"
 	Suffix        = ".logger"
-	EnableDebug   = 0
-	EnableConsole = 0
-	EnableFile    = 0
+	EnableDebug   = 1
+	EnableConsole = 0	
+	EnableFile    = 1
 )
 
 func init() {
