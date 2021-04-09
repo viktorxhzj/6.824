@@ -43,14 +43,14 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		resp.ConflictTerm = -1
 		return
 
-	// case sliceIdx == -1 && req.PrevLogIndex == 0:
+	case sliceIdx == -1 && req.PrevLogIndex == 0:
 
 	// PrevLogIndex matches the lastIncludedIndex in the snapshot
 	case sliceIdx == -1 && req.PrevLogIndex == rf.lastIncludedIndex:
 
 	case sliceIdx < 0:
 		resp.Info = LOG_INCONSISTENT
-		resp.ConflictIndex = len(rf.logs) + rf.offset - 1
+		resp.ConflictIndex = 0
 		resp.ConflictTerm = -1
 		return
 
@@ -80,12 +80,14 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	i := sliceIdx + 1
 	j := 0
 
-	for j < len(req.Entries) {
+	es := make([]LogEntry, len(req.Entries))
+	copy(es, req.Entries)
+	for j < len(es) {
 		if i == len(rf.logs) {
-			rf.logs = append(rf.logs, req.Entries[j])
-		} else if rf.logs[i].Term != req.Entries[j].Term {
+			rf.logs = append(rf.logs, es[j])
+		} else if rf.logs[i].Term != es[j].Term {
 			rf.logs = rf.logs[:i]
-			rf.logs = append(rf.logs, req.Entries[j])
+			rf.logs = append(rf.logs, es[j])
 		}
 		i++
 		j++
@@ -99,7 +101,6 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 }
 
 func (rf *Raft) sendAppendEntries(server int) {
-	var req AppendEntriesRequest
 outer:
 	for !rf.killed() {
 
@@ -140,7 +141,7 @@ outer:
 
 			snapReq.LeaderId = rf.me
 			snapReq.LeaderTerm = rf.currentTerm
-			snapReq.Snapshot = rf.LastestSnapshot()
+			snapReq.Snapshot = rf.lastestSnapshot()
 			rf.mu.Unlock()
 			/*--------------------CRITICAL SECTION--------------------*/
 
@@ -187,13 +188,17 @@ outer:
 		}
 
 		// From now on, it is assured that snapshot is not needed
+		var req AppendEntriesRequest
+		var resp AppendEntriesResponse
+
 		if pos == -1 {
 			req.PrevLogTerm = rf.lastIncludedTerm
 		} else {
 			req.PrevLogTerm = rf.logs[pos].Term
 		}
 		req.PrevLogIndex = prevLogIndex
-		req.Entries = rf.logs[pos+1:]
+		req.Entries = make([]LogEntry, len(rf.logs[pos+1:]))
+		copy(req.Entries, rf.logs[pos+1:])
 		req.LeaderTerm = rf.currentTerm
 		req.LeaderId = rf.me
 		req.LeaderCommitIndex = rf.commitIndex
@@ -202,7 +207,6 @@ outer:
 		rf.mu.Unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 
-		var resp AppendEntriesResponse
 
 		if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
 			resp.Info = NETWORK_FAILURE
@@ -243,23 +247,24 @@ outer:
 
 		// we need to reduce PrevLogIndex to ultimately find the matching entry
 		case LOG_INCONSISTENT:
+			Debug(rf, "LogIncosistent, ConflictIdx=%d, ConflictTerm=%d", resp.ConflictIndex, resp.ConflictTerm)
 
 			if resp.ConflictIndex == 0 {
 				rf.nextIndex[server] = 1
 			}
 
 			idx := rf.searchRightIndex(resp.ConflictTerm)
-
+			Debug(rf, "LogIncosistent, next-idx=%d", idx)
 			// upon receiving a conflict response, the Leader should first search its log for conflictTerm
 			// if it finds an entry in its log with that term, it should set nextIndex to be the one
 			// beyond the index of the last entry in that term in its log
 			// if it does not find an entry with that term, it should set nextIndex = conflictIndex
 			if len(rf.logs) == 0 {
 				rf.nextIndex[server] = resp.ConflictIndex
-			} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
-				rf.nextIndex[server] = rf.logs[idx-1].Index + 1
 			} else if rf.logs[idx].Term == resp.ConflictTerm {
 				rf.nextIndex[server] = rf.logs[idx].Index + 1
+			} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
+				rf.nextIndex[server] = rf.logs[idx-1].Index + 1
 			} else {
 				rf.nextIndex[server] = resp.ConflictIndex
 			}
@@ -294,7 +299,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		snapReq.LeaderId = rf.me
 		snapReq.LeaderTerm = rf.currentTerm
-		snapReq.Snapshot = rf.LastestSnapshot()
+		snapReq.Snapshot = rf.lastestSnapshot()
 		rf.mu.Unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 
@@ -401,12 +406,10 @@ func (rf *Raft) sendHeartBeat(server int) {
 
 		if len(rf.logs) == 0 {
 			rf.nextIndex[server] = resp.ConflictIndex
-		} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
-			rf.nextIndex[server] = rf.logs[idx-1].Index + 1
-
 		} else if rf.logs[idx].Term == resp.ConflictTerm {
 			rf.nextIndex[server] = rf.logs[idx].Index + 1
-
+		} else if idx > 0 && rf.logs[idx-1].Term == resp.ConflictTerm {
+			rf.nextIndex[server] = rf.logs[idx-1].Index + 1
 		} else {
 			rf.nextIndex[server] = resp.ConflictIndex
 		}

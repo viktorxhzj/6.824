@@ -66,30 +66,30 @@ func (rf *Raft) receiverTryUpdateCommitIndex(req *AppendEntriesRequest) {
 }
 
 func (rf *Raft) batchApply() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	if rf.commitIndex > rf.lastAppliedIndex {
-		Debug(rf, "BATCH_APPLY %d to %d", rf.lastAppliedIndex+1, rf.commitIndex)
-	}
-	for rf.commitIndex > rf.lastAppliedIndex {
-		rf.lastAppliedIndex++
-		idx := rf.lastAppliedIndex - rf.offset
-		if idx < 0 {
-			continue
-		}
-		entry := rf.logs[idx]
-		msg := ApplyMsg{
-			CommandValid: true,
-			Command:      entry.Command,
-			CommandIndex: entry.Index,
-			CommandTerm:  entry.Term,
-		}
-		rf.mu.Unlock()
-
-		rf.applyChan <- msg
-
+	for !rf.killed() {
 		rf.mu.Lock()
-		Debug(rf, "应用日志 [%d|%d]", msg.CommandIndex, msg.CommandTerm)
+		if rf.commitIndex > rf.lastAppliedIndex {
+			rf.lastAppliedIndex++
+			idx := rf.lastAppliedIndex - rf.offset
+			if idx < 0 {
+				rf.mu.Unlock()
+				continue
+			}
+			entry := rf.logs[idx]
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command:      entry.Command,
+				CommandIndex: entry.Index,
+				CommandTerm:  entry.Term,
+			}
+			Debug(rf, "应用日志 [%d|%d]", msg.CommandIndex, msg.CommandTerm)
+			rf.mu.Unlock()
+			rf.applyChan <- msg
+
+		} else {
+			rf.mu.Unlock()
+			return
+		}
 	}
 }
 

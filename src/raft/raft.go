@@ -109,8 +109,9 @@ func (rf *Raft) GetState() (int, bool) {
 // Start tries to start agreement on the next command to be appended to Raft's log.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
-	/*+++++++++++++++++++++++++++++++++++++++++*/
+	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	index, term := -1, -1
 	var isLeader bool
@@ -125,7 +126,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			index = rf.lastIncludedIndex + 1
 		}
 		term = rf.currentTerm
-
 		isLeader = true
 
 		// local append
@@ -140,15 +140,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.nextIndex[rf.me] = index + 1
 		Debug(rf, "更新match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
-		rf.mu.Unlock()
-		// send a signal
+		// non-blocking 
 		rf.appendChan <- 0
-
 	default:
-		rf.mu.Unlock()
+		// not a leader
 	}
 	return index, term, isLeader
-	/*-----------------------------------------*/
+	/*--------------------CRITICAL SECTION--------------------*/
 }
 
 // execute different processes based on the role of this Raft node.
@@ -213,10 +211,10 @@ func (rf *Raft) followerLoop() {
 func (rf *Raft) candidateLoop() {
 
 	for !rf.killed() {
-		Debug(rf, "start new election")
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
+		Debug(rf, "start new election")
 		if rf.role != CANDIDATE {
 			rf.mu.Unlock()
 			return

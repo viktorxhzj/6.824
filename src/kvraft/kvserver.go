@@ -76,11 +76,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.state = make(map[string]string)
 	kv.clerks = make(map[int64]int64)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
-	// You may need initialization code here.
-
 	kv.distro = make(map[int]map[int]chan RaftResponse)
+	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 	go kv.executeLoop()
@@ -91,15 +88,14 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 func (kv *KVServer) result(r RaftRequest) RaftResponse {
 
+	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+	kv.mu.Lock()
 	var idx, term int
 	var ok bool
-
-	kv.mu.Lock()
-
-	if r.OpType == NIL {
+	switch r.OpType {
+	case NIL:
 		idx, term, ok = kv.rf.Start(nil)
-
-	} else {
+	default:
 		idx, term, ok = kv.rf.Start(r)
 	}
 
@@ -118,6 +114,7 @@ func (kv *KVServer) result(r RaftRequest) RaftResponse {
 		mm[term] = ch
 	}
 	kv.mu.Unlock()
+	/*--------------------CRITICAL SECTION--------------------*/
 
 	rr := <-ch
 	close(ch)
@@ -130,152 +127,148 @@ func (kv *KVServer) result(r RaftRequest) RaftResponse {
 
 func (kv *KVServer) executeLoop() {
 
-	data :=	kv.rf.LastestSnapshot().Data
+	// Upon initialization
+	data := kv.rf.LastestSnapshot().Data
 	kv.deserializeState(data)
 
+main:
 	for !kv.killed() {
 
 		msg := <-kv.applyCh
 
+		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+		kv.mu.Lock()
+
 		// deal with snapshot
-		if !msg.CommandValid && msg.SnapshotValid {
-			kv.mu.Lock()
+		if msg.SnapshotValid {
 			Debug(kv.me, "收到快照{...=>[%d|%d]", msg.SnapshotIndex, msg.SnapshotTerm)
-			kv.deserializeState(msg.Snapshot)
-			ii := msg.SnapshotIndex
-			for idx, v := range kv.distro {
-				if idx <= ii {
-					for term, vv := range v {
-						vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
-						delete(v, term)
+
+			if kv.rf.CondInstallSnapshot(msg.SnapshotTerm, msg.SnapshotIndex, msg.Snapshot) {
+				kv.deserializeState(msg.Snapshot)
+				ii := msg.SnapshotIndex
+				for idx, v := range kv.distro {
+					if idx <= ii {
+						for term, vv := range v {
+							vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
+							delete(v, term)
+						}
+						delete(kv.distro, idx)
 					}
-					delete(kv.distro, idx)
 				}
 			}
 			kv.mu.Unlock()
-			continue
-		}
-
-		// deal with commands
-		idx, term := msg.CommandIndex, msg.CommandTerm
-		r, ok := msg.Command.(RaftRequest)
-		Debug(kv.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
-		// No-op
-		if !ok {
-			kv.mu.Lock()
-			mm := kv.distro[idx]
-			for _, v := range mm {
-				v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: r.OpType}
-			}
-			delete(kv.distro, idx)
-			kv.mu.Unlock()
-			continue
-		}
-		seq := kv.clerks[r.Uid]
-
-		// 幂等性校验
-		if r.OpType != GET && r.Seq <= seq {
-			kv.mu.Lock()
-			mm := kv.distro[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: DUPLICATE_REQUEST, OpType: r.OpType}
-				} else {
+		} else if msg.CommandValid {
+			// deal with commands
+			idx, term := msg.CommandIndex, msg.CommandTerm
+			r, ok := msg.Command.(RaftRequest)
+			Debug(kv.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
+			// No-op
+			if !ok {
+				mm := kv.distro[idx]
+				for _, v := range mm {
 					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: r.OpType}
 				}
+				delete(kv.distro, idx)
+				kv.mu.Unlock()
+				continue main
 			}
-			delete(kv.distro, idx)
-			kv.mu.Unlock()
-			continue
-		}
+			seq := kv.clerks[r.Uid]
 
-		kv.clerks[r.Uid] = r.Seq
-
-		switch r.OpType {
-		case GET:
-			kv.mu.Lock()
-			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distro[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: GET}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: GET}
-				}
-			}
-			delete(kv.distro, idx)
-			kv.mu.Unlock()
-
-		case PUT:
-			kv.mu.Lock()
-			kv.state[r.Key] = r.Value
-			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distro[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: PUT}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: PUT}
-				}
-			}
-			delete(kv.distro, idx)
-			kv.mu.Unlock()
-
-		case APPEND:
-			kv.mu.Lock()
-			kv.state[r.Key] = kv.state[r.Key] + r.Value
-			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distro[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: APPEND}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: APPEND}
-				}
-			}
-			delete(kv.distro, idx)
-			kv.mu.Unlock()
-
-		}
-
-		// should snapshot?
-		if kv.maxraftstate != -1 && kv.rf.ShouldSnapshot(kv.maxraftstate) {
-			kv.mu.Lock()
-			snapshot := kv.serializeState()
-			ii := msg.CommandIndex
-			for idx, v := range kv.distro {
-				if idx <= ii {
-					for term, vv := range v {
-						vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
-						delete(v, term)
+			// 幂等性校验
+			if r.OpType != GET && r.Seq <= seq {
+				mm := kv.distro[idx]
+				for k, v := range mm {
+					if k == term {
+						v <- RaftResponse{RPCInfo: DUPLICATE_REQUEST, OpType: r.OpType}
+					} else {
+						v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: r.OpType}
 					}
-					delete(kv.distro, idx)
 				}
+				delete(kv.distro, idx)
+				kv.mu.Unlock()
+				continue main
 			}
-			kv.rf.Snapshot(msg.CommandIndex, snapshot)
+
+			kv.clerks[r.Uid] = r.Seq
+
+			switch r.OpType {
+			case GET:
+				val := kv.state[r.Key]
+				Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
+				mm := kv.distro[idx]
+				for k, v := range mm {
+					if k == term {
+						v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: GET}
+					} else {
+						v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: GET}
+					}
+				}
+				delete(kv.distro, idx)
+
+			case PUT:
+				kv.state[r.Key] = r.Value
+				val := kv.state[r.Key]
+				Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
+				mm := kv.distro[idx]
+				for k, v := range mm {
+					if k == term {
+						v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: PUT}
+					} else {
+						v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: PUT}
+					}
+				}
+				delete(kv.distro, idx)
+
+			case APPEND:
+				kv.state[r.Key] = kv.state[r.Key] + r.Value
+				val := kv.state[r.Key]
+				Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
+				mm := kv.distro[idx]
+				for k, v := range mm {
+					if k == term {
+						v <- RaftResponse{RPCInfo: SUCCESS, Value: val, OpType: APPEND}
+					} else {
+						v <- RaftResponse{RPCInfo: FAILED_REQUEST, OpType: APPEND}
+					}
+				}
+				delete(kv.distro, idx)
+			}
+
+			// should snapshot?
+			if kv.maxraftstate != -1 && kv.rf.ShouldSnapshot(kv.maxraftstate) {
+				stateBytes := kv.serializeState()
+				ii := msg.CommandIndex
+				for idx, v := range kv.distro {
+					if idx <= ii {
+						for term, vv := range v {
+							vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
+							delete(v, term)
+						}
+						delete(kv.distro, idx)
+					}
+				}
+				kv.rf.Snapshot(msg.CommandIndex, stateBytes)
+			}
+
+			Debug(kv.me, "Distro %+v", kv.distro)
+			kv.mu.Unlock()
+
+		} else {
 			kv.mu.Unlock()
 		}
-
-		kv.mu.Lock()
-		Debug(kv.me, "Distro %+v", kv.distro)
-		kv.mu.Unlock()
+		/*--------------------CRITICAL SECTION--------------------*/
 	}
 }
 
 func (kv *KVServer) noopLoop() {
 
 	for !kv.killed() {
-
 		time.Sleep(NO_OP_INTERVAL * time.Millisecond)
-
 		r := RaftRequest{
 			OpType: NIL,
 		}
-
-		kv.result(r)
+		Debug(kv.me, "Periodically No-Op")
+		go kv.result(r)
 	}
 }
 
@@ -291,8 +284,6 @@ func (kv *KVServer) deserializeState(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var clerks map[int64]int64

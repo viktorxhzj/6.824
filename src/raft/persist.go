@@ -10,28 +10,25 @@ func (rf *Raft) ShouldSnapshot(maxSize int) bool {
 	return rf.persister.RaftStateSize() > maxSize
 }
 
-// Mono increasing for sure
-func (rf *Raft) persistStateAndSnapshot(s Snapshot) {
-	state, snap := rf.makeRaftStateBytes(), rf.makeSnapshotBytes(s)
-	rf.persister.SaveStateAndSnapshot(state, snap)
-}
-
-func (rf *Raft) LastestSnapshot() Snapshot {
+func (rf *Raft) lastestSnapshot() Snapshot {
 	data := rf.persister.ReadSnapshot()
 	if len(data) == 0 {
 		return Snapshot{}
 	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
-	var bunk SnapshotBunk
-	if err := d.Decode(&bunk); err != nil {
+	var s Snapshot
+	if err := d.Decode(&s); err != nil {
 		panic(err)
 	}
-	if len(bunk.Entries) == 0 {
-		panic("无快照")
-	}
-	Debug(rf, "读取最新快照 %+v", bunk)
-	return bunk.Entries[len(bunk.Entries)-1]
+	Debug(rf, "读取最新快照 %+v", s)
+	return s
+}
+
+func (rf *Raft) LastestSnapshot() Snapshot {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.lastestSnapshot()
 }
 
 //
@@ -46,36 +43,13 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(data)
 }
 
-type SnapshotBunk struct {
-	Entries []Snapshot
-}
-
 func (rf *Raft) makeSnapshotBytes(s Snapshot) []byte {
-	data := rf.persister.ReadSnapshot()
-	var bunk SnapshotBunk
-	if len(data) >= 1 {
-		r := bytes.NewBuffer(data)
-		d := labgob.NewDecoder(r)
-		if err := d.Decode(&bunk); err != nil {
-			panic("快照列表读取失败")
-		}
-	}
-	// 缩进快照列表
-	for len(bunk.Entries) > 0 {
-		if bunk.Entries[0].LastIncludedIndex < s.LastIncludedIndex {
-			bunk.Entries = bunk.Entries[1:]
-		} else {
-			break
-		}
-	}
-	bunk.Entries = append(bunk.Entries, s)
-
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	e.Encode(bunk)
-	Debug(rf, "更新快照列表 %+v", bunk)
+	e.Encode(s)
 	return w.Bytes()
 }
+
 
 func (rf *Raft) makeRaftStateBytes() []byte {
 	w := new(bytes.Buffer)
