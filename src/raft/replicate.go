@@ -77,7 +77,7 @@ func (rf *Raft) batchApply() {
 			}
 			entry := rf.logs[idx]
 			msg := ApplyMsg{
-				CommandValid: true,
+				CommandValid: entry.Command != nil,
 				Command:      entry.Command,
 				CommandIndex: entry.Index,
 				CommandTerm:  entry.Term,
