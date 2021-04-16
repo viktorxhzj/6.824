@@ -1,12 +1,10 @@
 package shardctrler
 
-
 import (
-	"6.824/raft"
 	"6.824/labrpc"
- 	"sync"
+	"6.824/raft"
+	"sync"
 )
-
 
 type ShardCtrler struct {
 	mu      sync.Mutex
@@ -22,18 +20,16 @@ type ShardCtrler struct {
 	configs []Config // indexed by config num
 }
 
-
 type Op struct {
 	// Your data here.
 }
 
-
 func (sc *ShardCtrler) Join(args *JoinRequest, reply *JoinResponse) {
 	// Your code here.
 	req := RaftRequest{
-		OpType: JOIN,
+		OpType:  JOIN,
 		ClerkId: args.ClerkId,
-		Input: args.Servers,
+		Input:   args.Servers,
 	}
 	resp := RaftResponse{}
 	sc.tryApplyAndGetResult(&req, &resp)
@@ -43,9 +39,9 @@ func (sc *ShardCtrler) Join(args *JoinRequest, reply *JoinResponse) {
 func (sc *ShardCtrler) Leave(args *LeaveRequest, reply *LeaveResponse) {
 	// Your code here.
 	req := RaftRequest{
-		OpType: JOIN,
+		OpType:  LEAVE,
 		ClerkId: args.ClerkId,
-		Input: args.GIDs,
+		Input:   args.GIDs,
 	}
 	resp := RaftResponse{}
 	sc.tryApplyAndGetResult(&req, &resp)
@@ -55,9 +51,9 @@ func (sc *ShardCtrler) Leave(args *LeaveRequest, reply *LeaveResponse) {
 func (sc *ShardCtrler) Move(args *MoveRequest, reply *MoveResponse) {
 	// Your code here.
 	req := RaftRequest{
-		OpType: JOIN,
+		OpType:  MOVE,
 		ClerkId: args.ClerkId,
-		Input: args.Movable,
+		Input:   args.Movable,
 	}
 	resp := RaftResponse{}
 	sc.tryApplyAndGetResult(&req, &resp)
@@ -67,12 +63,16 @@ func (sc *ShardCtrler) Move(args *MoveRequest, reply *MoveResponse) {
 func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 	// Your code here.
 	req := RaftRequest{
-		OpType: JOIN,
+		OpType:  QUERY,
 		ClerkId: args.ClerkId,
-		Input: args.Num,
+		Input:   args.Num,
 	}
 	resp := RaftResponse{}
 	sc.tryApplyAndGetResult(&req, &resp)
+	if resp.RPCInfo != SUCCESS {
+		reply.RPCInfo = resp.RPCInfo
+		return
+	}
 	src := resp.Output.(Config)
 	shards := [NShards]int{}
 	for i := 0; i < NShards; i++ {
@@ -87,7 +87,7 @@ func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 		groups[k] = arr
 	}
 	reply.Config = Config{
-		Num: num,
+		Num:    num,
 		Shards: shards,
 		Groups: groups,
 	}
@@ -112,13 +112,11 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
-
 	sc.clerks = make(map[int64]int64)
 	sc.distro = make(map[int]map[int]chan RaftResponse)
 
 	go sc.executeLoop()
 	go sc.noopLoop()
-
 
 	return sc
 }

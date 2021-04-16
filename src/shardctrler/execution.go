@@ -1,7 +1,7 @@
 package shardctrler
 
 import (
-	"sort"
+	"container/heap"
 	"time"
 )
 
@@ -25,7 +25,7 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse
 	}
 
 	ch := make(chan RaftResponse)
-	Debug(sc.me, "开启通道[%d|%d]%+v {%+v}", idx, term, ch, *req)
+	// Debug(sc.me, "开启通道[%d|%d]%+v {%+v}", idx, term, ch, *req)
 	if mm := sc.distro[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
 		sc.distro[idx] = mm
@@ -40,7 +40,7 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse
 	close(ch)
 	resp.Output = rr.Output
 	resp.RPCInfo = rr.RPCInfo
-	Debug(sc.me, "关闭通道[%d|%d]%+v {%+v %+v}", idx, term, ch, req.ClerkId, req.OpType)
+	// Debug(sc.me, "关闭通道[%d|%d]%+v {%+v %+v}", idx, term, ch, req.ClerkId, req.OpType)
 }
 
 func (sc *ShardCtrler) executeLoop() {
@@ -94,8 +94,6 @@ main:
 		case JOIN:
 			servers := r.Input.(map[int][]string)
 			sc.joinGroups(servers)
-			config := sc.configs[len(sc.configs)-1]
-			Debug(sc.me, "CONF %d [%+v]", config.Num, config.Shards)
 			mm := sc.distro[idx]
 			for k, v := range mm {
 				if k == term {
@@ -108,8 +106,6 @@ main:
 		case LEAVE:
 			gids := r.Input.([]int)
 			sc.leaveGroups(gids)
-			config := sc.configs[len(sc.configs)-1]
-			Debug(sc.me, "CONF %d [%+v]", config.Num, config.Shards)
 			mm := sc.distro[idx]
 			for k, v := range mm {
 				if k == term {
@@ -122,8 +118,6 @@ main:
 		case MOVE:
 			movable := r.Input.(Movable)
 			sc.moveOneShard(movable)
-			config := sc.configs[len(sc.configs)-1]
-			Debug(sc.me, "CONF %d [%+v]", config.Num, config.Shards)
 			mm := sc.distro[idx]
 			for k, v := range mm {
 				if k == term {
@@ -141,7 +135,7 @@ main:
 			} else {
 				config = sc.configs[len(sc.configs)-1]
 			}
-			Debug(sc.me, "CONF %d [%+v]", config.Num, config.Shards)
+			Debug(sc.me, "%+v", config)
 			mm := sc.distro[idx]
 			for k, v := range mm {
 				if k == term {
@@ -152,7 +146,7 @@ main:
 			}
 		}
 		delete(sc.distro, idx)
-		Debug(sc.me, "Distro %+v", sc.distro)
+		// Debug(sc.me, "Distro %+v", sc.distro)
 		sc.mu.Unlock()
 
 		/*--------------------CRITICAL SECTION--------------------*/
@@ -171,7 +165,7 @@ func (sc *ShardCtrler) noopLoop() {
 }
 
 // [0,9]
-// [0,4] [5,9] 
+// [0,4] [5,9]
 // [0,1] [2,4] [5,9]
 // [0,1] [2,4] [5,6] [7,9]
 // [0,1] [2]   [3,4] [5,6] [7,9]
@@ -181,7 +175,7 @@ func (sc *ShardCtrler) noopLoop() {
 func (sc *ShardCtrler) moveOneShard(m Movable) {
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num: lastConfig.Num + 1,
+		Num:    lastConfig.Num + 1,
 		Groups: make(map[int][]string),
 	}
 	for g, srvs := range lastConfig.Groups {
@@ -194,7 +188,10 @@ func (sc *ShardCtrler) moveOneShard(m Movable) {
 	sc.configs = append(sc.configs, newConfig)
 }
 
-
+// 5 5
+// 3 3 4
+// 2 2 2 4
+// 2 2 2 2 2
 func (sc *ShardCtrler) joinGroups(servers map[int][]string) {
 	if len(sc.configs) == 0 {
 		panic("No init config")
@@ -202,147 +199,69 @@ func (sc *ShardCtrler) joinGroups(servers map[int][]string) {
 
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num: lastConfig.Num + 1,
+		Num:    lastConfig.Num + 1,
 		Groups: make(map[int][]string),
 	}
 
-	// if config # = 0, len(list) = 0
-	var list MappingList
+	gids := Heap{}
 	for g, srvs := range lastConfig.Groups {
 		newConfig.Groups[g] = srvs
-		list = append(list, ShardMapping{GID: g})
+		heap.Push(&gids, g)
 	}
 	for g, srvs := range servers {
-		if _, ok := newConfig.Groups[g]; ok {
-			panic("Already exists")
-		}
 		newConfig.Groups[g] = srvs
-	}
-	for s := 0; s < NShards; s++ {
-		g := lastConfig.Shards[s]
-		for j := range list {
-			if list[j].GID == g {
-				list[j].Shards = append(list[j].Shards, s)
-			}
-		}
-	}
-	sort.Sort(list)
-
-	for ng := range servers {
-		sm := ShardMapping{GID: ng}
-		if len(list) == 0 {
-			for s := 0; s < NShards; s++ {
-				sm.Shards = append(sm.Shards, s)
-			}
-		} else {
-			lsm := list[len(list)-1]
-			n := len(lsm.Shards)/2
-			var j int
-			for ;j < n; j++ {
-				sm.Shards = append(sm.Shards, lsm.Shards[j])
-			}
-			lsm.Shards = lsm.Shards[j+1:]
-		}
-		list = append(list, sm)
-		sort.Sort(list)
+		heap.Push(&gids, g)
 	}
 
-	for _, sm := range list {
-		for _, s := range sm.Shards {
-			newConfig.Shards[s] = sm.GID
-		}
-	}
-	
+	reallocSlots(&newConfig, &gids)
+	Debug(sc.me, "%+v", newConfig)
 	sc.configs = append(sc.configs, newConfig)
 }
 
-func (sc *ShardCtrler) leaveGroups(gids []int) {
+func (sc *ShardCtrler) leaveGroups(lgids []int) {
 	if len(sc.configs) == 0 {
 		panic("No init config")
 	}
 
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num: lastConfig.Num + 1,
+		Num:    lastConfig.Num + 1,
 		Groups: make(map[int][]string),
 	}
 
-	// if config # = 0, len(list) = 0
-	var list MappingList
 	for g, srvs := range lastConfig.Groups {
 		newConfig.Groups[g] = srvs
-		list = append(list, ShardMapping{GID: g})
 	}
-	if len(list) == 0 {
-		panic("config no group")
-	}
-	for s := 0; s < NShards; s++ {
-		g := lastConfig.Shards[s]
-		for j := range list {
-			if list[j].GID == g {
-				list[j].Shards = append(list[j].Shards, s)
-			}
-		}
-	}
-	sort.Sort(list)
-
-	for _, lg := range gids {
+	for _, lg := range lgids {
 		delete(newConfig.Groups, lg)
 	}
-	// lg = leaving group
-	for i, lg := range gids {
-		if list[0].GID == lg && len(list) == 1 {
-			if i != len(gids) - 1 {
-				panic("...")
-			}
-			list = []ShardMapping{}
-			break
-		}
-		var lgsm ShardMapping
-		var k int
-		for j := range list {
-			if list[j].GID == lg {
-				lgsm = list[j]
-				k = j
-				break
-			}
-		}
-		if list[0].GID == lg {
-			list[1].Shards = append(list[1].Shards, lgsm.Shards...)
-		} else {
-			list[0].Shards = append(list[0].Shards, lgsm.Shards...)
-		}
-		list = append(list[:k], list[k+1:]...)
-		sort.Sort(list)
+	gids := Heap{}
+	for g := range newConfig.Groups {
+		heap.Push(&gids, g)
 	}
 
-	for _, sm := range list {
-		for _, s := range sm.Shards {
-			newConfig.Shards[s] = sm.GID
-		}
-	}
-	
+	reallocSlots(&newConfig, &gids)
+	Debug(sc.me, "%+v", newConfig)
 	sc.configs = append(sc.configs, newConfig)
 }
 
-type ShardMapping struct {
-	GID int
-	Shards []int
-}
-
-type MappingList []ShardMapping
-
-func (l MappingList) Len() int {
-	return len(l)
-}
-func (l MappingList) Less(i, j int) bool {
-	if len(l[i].Shards) != len(l[j].Shards) {
-		return len(l[i].Shards) < len(l[j].Shards)
+func reallocSlots(config *Config, gids *Heap) {
+	size := gids.Len()
+	if size == 0 {
+		return
 	}
-	return l[i].GID < l[j].GID
-}
-func (l MappingList) Swap(i, j int) {
-	k := l[i]
-	l[i] = l[j]
-	l[j] = k
+	each, res := NShards/size, NShards%size
+	var offset int
+	for gids.Len() > 0 {
+		g := heap.Pop(gids).(int)
+		for i := 0; i < each; i++ {
+			config.Shards[offset] = g
+			offset++
+		}
+		if res > 0 {
+			res--
+			config.Shards[offset] = g
+			offset++
+		}
+	}
 }

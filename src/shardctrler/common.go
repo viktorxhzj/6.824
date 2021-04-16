@@ -20,7 +20,7 @@ import "fmt"
 //
 
 // The number of shards.
-const NShards = 10
+const NShards = 1 << 4
 
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
@@ -28,6 +28,14 @@ type Config struct {
 	Num    int              // config number
 	Shards [NShards]int     // shard -> gid
 	Groups map[int][]string // gid -> servers[]
+}
+
+func (c Config) String() string {
+	m := make(map[int]int)
+	for _, g := range c.Shards {
+		m[g] = m[g] + 1
+	}
+	return fmt.Sprintf("CONF %d, %v", c.Num, m)
 }
 
 const (
@@ -109,7 +117,34 @@ type RaftRequest struct {
 	Input interface{}
 }
 
+func (r RaftRequest) String() string {
+	str := r.ClerkId.String()
+	switch v := r.Input.(type) {
+	// Query
+	case int:
+		str += fmt.Sprintf("Query %d", v)
+
+	// Join
+	case map[int][]string:
+		s := make([]int, 0)
+		for g := range v {
+			s = append(s, g)
+		}
+		str += fmt.Sprintf("Join %+v", s)
+
+	// Leave
+	case []int:
+		str += fmt.Sprintf("Leave %+v", v)
+
+	// Move
+	case Movable:
+		str += fmt.Sprintf("Move Shard %d to GID %d", v.Shard, v.GID)
+	}
+
+	return str
+}
+
 type RaftResponse struct {
-	Output interface{}
+	Output  interface{}
 	RPCInfo string
 }

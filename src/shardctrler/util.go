@@ -62,6 +62,14 @@ func registerRPCs() {
 
 	labgob.Register(raft.RequestVoteRequest{})
 	labgob.Register(raft.RequestVoteResponse{})
+
+	labgob.Register(RaftRequest{})
+	labgob.Register(RaftResponse{})
+
+	labgob.Register(map[int][]string{})
+	labgob.Register([]int{})
+
+	labgob.Register(Movable{})
 }
 
 func TimerForTest(c chan int) {

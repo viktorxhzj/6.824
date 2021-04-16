@@ -12,7 +12,7 @@ var (
 	Suffix        = ".logger"
 	EnableDebug   = 1
 	EnableConsole = 0
-	EnableFile    = 1
+	EnableFile    = 0
 )
 
 func init() {
