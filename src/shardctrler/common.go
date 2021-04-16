@@ -1,5 +1,7 @@
 package shardctrler
 
+import "fmt"
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -32,42 +34,82 @@ const (
 	OK = "OK"
 )
 
+const (
+	JOIN  = "Join"
+	LEAVE = "Leave"
+	MOVE  = "Move"
+	QUERY = "Query"
+	NIL   = "NIL"
+
+	SUCCESS           = "成功"
+	NETWORK_FAILURE   = "超时"
+	WRONG_LEADER      = "非法领袖"
+	FAILED_REQUEST    = "失败重试"
+	DUPLICATE_REQUEST = "幂等拦截"
+
+	NO_OP_INTERVAL = 1000
+)
+
+type ClerkId struct {
+	Uid int64
+	Seq int64
+}
+
+func (c ClerkId) String() string {
+	return fmt.Sprintf("[CLI-%d SEQ-%d]", c.Uid, c.Seq)
+}
+
 type Err string
 
-type JoinArgs struct {
+type JoinRequest struct {
 	Servers map[int][]string // new GID -> servers mappings
+	ClerkId
 }
 
-type JoinReply struct {
-	WrongLeader bool
-	Err         Err
+type JoinResponse struct {
+	RPCInfo string
 }
 
-type LeaveArgs struct {
+type LeaveRequest struct {
 	GIDs []int
+	ClerkId
 }
 
-type LeaveReply struct {
-	WrongLeader bool
-	Err         Err
+type LeaveResponse struct {
+	RPCInfo string
 }
 
-type MoveArgs struct {
+type Movable struct {
 	Shard int
 	GID   int
 }
 
-type MoveReply struct {
-	WrongLeader bool
-	Err         Err
+type MoveRequest struct {
+	Movable
+	ClerkId
 }
 
-type QueryArgs struct {
+type MoveResponse struct {
+	RPCInfo string
+}
+
+type QueryRequest struct {
 	Num int // desired config number
+	ClerkId
 }
 
-type QueryReply struct {
-	WrongLeader bool
-	Err         Err
-	Config      Config
+type QueryResponse struct {
+	Config
+	RPCInfo string
+}
+
+type RaftRequest struct {
+	OpType string
+	ClerkId
+	Input interface{}
+}
+
+type RaftResponse struct {
+	Output interface{}
+	RPCInfo string
 }

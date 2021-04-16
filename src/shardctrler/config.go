@@ -5,7 +5,6 @@ import "6.824/raft"
 import "testing"
 import "os"
 
-// import "log"
 import crand "crypto/rand"
 import "math/rand"
 import "encoding/base64"

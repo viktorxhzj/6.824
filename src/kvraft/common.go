@@ -20,7 +20,6 @@ const (
 	DUPLICATE_REQUEST RPCInfo = "幂等拦截"
 
 	NO_OP_INTERVAL          = 1000
-	SIZE_DETECTION_INTERVAL = 2000
 )
 
 type ClerkId struct {

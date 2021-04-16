@@ -1,10 +1,11 @@
 package shardctrler
 
 
-import "6.824/raft"
-import "6.824/labrpc"
-import "sync"
-import "6.824/labgob"
+import (
+	"6.824/raft"
+	"6.824/labrpc"
+ 	"sync"
+)
 
 
 type ShardCtrler struct {
@@ -12,8 +13,11 @@ type ShardCtrler struct {
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
+	dead    int32
 
 	// Your data here.
+	distro map[int]map[int]chan RaftResponse // distribution channels
+	clerks map[int64]int64                   // sequence number for each known client
 
 	configs []Config // indexed by config num
 }
@@ -24,37 +28,70 @@ type Op struct {
 }
 
 
-func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
+func (sc *ShardCtrler) Join(args *JoinRequest, reply *JoinResponse) {
 	// Your code here.
+	req := RaftRequest{
+		OpType: JOIN,
+		ClerkId: args.ClerkId,
+		Input: args.Servers,
+	}
+	resp := RaftResponse{}
+	sc.tryApplyAndGetResult(&req, &resp)
+	reply.RPCInfo = resp.RPCInfo
 }
 
-func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
+func (sc *ShardCtrler) Leave(args *LeaveRequest, reply *LeaveResponse) {
 	// Your code here.
+	req := RaftRequest{
+		OpType: JOIN,
+		ClerkId: args.ClerkId,
+		Input: args.GIDs,
+	}
+	resp := RaftResponse{}
+	sc.tryApplyAndGetResult(&req, &resp)
+	reply.RPCInfo = resp.RPCInfo
 }
 
-func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
+func (sc *ShardCtrler) Move(args *MoveRequest, reply *MoveResponse) {
 	// Your code here.
+	req := RaftRequest{
+		OpType: JOIN,
+		ClerkId: args.ClerkId,
+		Input: args.Movable,
+	}
+	resp := RaftResponse{}
+	sc.tryApplyAndGetResult(&req, &resp)
+	reply.RPCInfo = resp.RPCInfo
 }
 
-func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
+func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 	// Your code here.
-}
+	req := RaftRequest{
+		OpType: JOIN,
+		ClerkId: args.ClerkId,
+		Input: args.Num,
+	}
+	resp := RaftResponse{}
+	sc.tryApplyAndGetResult(&req, &resp)
+	src := resp.Output.(Config)
+	shards := [NShards]int{}
+	for i := 0; i < NShards; i++ {
+		shards[i] = src.Shards[i]
+	}
+	groups := make(map[int][]string)
+	num := src.Num
 
-
-//
-// the tester calls Kill() when a ShardCtrler instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
-func (sc *ShardCtrler) Kill() {
-	sc.rf.Kill()
-	// Your code here, if desired.
-}
-
-// needed by shardkv tester
-func (sc *ShardCtrler) Raft() *raft.Raft {
-	return sc.rf
+	for k, v := range src.Groups {
+		arr := make([]string, len(v))
+		copy(arr, v)
+		groups[k] = arr
+	}
+	reply.Config = Config{
+		Num: num,
+		Shards: shards,
+		Groups: groups,
+	}
+	reply.RPCInfo = resp.RPCInfo
 }
 
 //
@@ -64,17 +101,24 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 // me is the index of the current server in servers[].
 //
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister) *ShardCtrler {
+	registerRPCs()
+
 	sc := new(ShardCtrler)
 	sc.me = me
 
 	sc.configs = make([]Config, 1)
 	sc.configs[0].Groups = map[int][]string{}
 
-	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
-	// Your code here.
+
+	sc.clerks = make(map[int64]int64)
+	sc.distro = make(map[int]map[int]chan RaftResponse)
+
+	go sc.executeLoop()
+	go sc.noopLoop()
+
 
 	return sc
 }
