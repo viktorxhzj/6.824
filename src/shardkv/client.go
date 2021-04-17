@@ -8,38 +8,18 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "6.824/labrpc"
-import "crypto/rand"
-import "math/big"
-import "6.824/shardctrler"
-import "time"
-
-//
-// which shard is a key in?
-// please use this function,
-// and please do not change it.
-//
-func key2shard(key string) int {
-	shard := 0
-	if len(key) > 0 {
-		shard = int(key[0])
-	}
-	shard %= shardctrler.NShards
-	return shard
-}
-
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
-}
+import (
+	"6.824/labrpc"
+	"6.824/shardctrler"
+	"time"
+)
 
 type Clerk struct {
-	sm       *shardctrler.Clerk
+	scc       *shardctrler.Clerk
 	config   shardctrler.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	ClerkId
 }
 
 //
@@ -53,9 +33,10 @@ type Clerk struct {
 //
 func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
-	ck.sm = shardctrler.MakeClerk(ctrlers)
+	ck.scc = shardctrler.MakeClerk(ctrlers)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.Uid = GenerateClerkId()
 	return ck
 }
 
@@ -66,33 +47,46 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 // You will have to modify this function.
 //
 func (ck *Clerk) Get(key string) string {
-	args := GetArgs{}
-	args.Key = key
 
+	ck.Seq++
+	req := GetRequest{
+		Key: key,
+		ClerkId: ClerkId{
+			Uid: ck.Uid,
+			Seq: ck.Seq,
+		},
+	}
+	shard := key2shard(key)
+	CDebug(ck.Uid, "开始%+v,分片%d", req, shard)
 	for {
-		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
 			// try each server for the shard.
+			CDebug(ck.Uid, "%+v轮询GID%d", req, gid)
+		round:
 			for si := 0; si < len(servers); si++ {
+				var resp GetResponse
 				srv := ck.make_end(servers[si])
-				var reply GetReply
-				ok := srv.Call("ShardKV.Get", &args, &reply)
-				if ok && (reply.Err == OK || reply.Err == ErrNoKey) {
-					return reply.Value
+				if ok := srv.Call("ShardKV.Get", &req, &resp); !ok {
+					resp.RPCInfo = NETWORK_FAILURE
 				}
-				if ok && (reply.Err == ErrWrongGroup) {
-					break
+				resp.Key = req.Key
+				resp.ClerkId = req.ClerkId
+				CDebug(ck.Uid, "%+v", resp)
+				switch resp.RPCInfo {
+				case SUCCESS:
+					return resp.Value
+				case WRONG_GROUP:
+					break round
+				default:
 				}
 				// ... not ok, or ErrWrongLeader
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 		// ask controler for the latest configuration.
-		ck.config = ck.sm.Query(-1)
+		ck.config = ck.scc.Query(-1)
 	}
-
-	return ""
 }
 
 //
@@ -100,32 +94,51 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{}
-	args.Key = key
-	args.Value = value
-	args.Op = op
 
+	ck.Seq++
+	req := PutAppendRequest{
+		Key:   key,
+		Value: value,
+		ClerkId: ClerkId{
+			Uid: ck.Uid,
+			Seq: ck.Seq,
+		},
+		OpType: op,
+	}
+	shard := key2shard(key)
+	CDebug(ck.Uid, "开始%+v,分片%d", req, shard)
 
 	for {
-		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
+			CDebug(ck.Uid, "%+v轮询GID%d", req, gid)
+		round:
 			for si := 0; si < len(servers); si++ {
+				var resp PutAppendResponse
 				srv := ck.make_end(servers[si])
-				var reply PutAppendReply
-				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
-				if ok && reply.Err == OK {
-					return
+				if ok := srv.Call("ShardKV.PutAppend", &req, &resp); !ok {
+					resp.RPCInfo = NETWORK_FAILURE
 				}
-				if ok && reply.Err == ErrWrongGroup {
-					break
+				resp.Key = req.Key
+				resp.OpType = req.OpType
+				resp.ClerkId = req.ClerkId
+				CDebug(ck.Uid, "%+v", resp)
+				switch resp.RPCInfo {
+				case SUCCESS:
+					return
+				case DUPLICATE_REQUEST:
+					return
+				case WRONG_GROUP:
+					break round
+				default:
+
 				}
 				// ... not ok, or ErrWrongLeader
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 		// ask controler for the latest configuration.
-		ck.config = ck.sm.Query(-1)
+		ck.config = ck.scc.Query(-1)
 	}
 }
 

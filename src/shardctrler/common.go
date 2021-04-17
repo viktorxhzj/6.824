@@ -51,7 +51,7 @@ const (
 
 	SUCCESS           = "成功"
 	NETWORK_FAILURE   = "超时"
-	WRONG_LEADER      = "非法领袖"
+	WRONG_LEADER      = "错误领袖"
 	FAILED_REQUEST    = "失败重试"
 	DUPLICATE_REQUEST = "幂等拦截"
 
@@ -59,12 +59,12 @@ const (
 )
 
 type ClerkId struct {
-	Uid int64
+	Uid string
 	Seq int64
 }
 
 func (c ClerkId) String() string {
-	return fmt.Sprintf("[CLI-%d SEQ-%d]", c.Uid, c.Seq)
+	return fmt.Sprintf("[%s SEQ-%d]", c.Uid, c.Seq)
 }
 
 type Err string

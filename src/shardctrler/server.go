@@ -14,9 +14,8 @@ type ShardCtrler struct {
 	dead    int32
 
 	// Your data here.
-	distro map[int]map[int]chan RaftResponse // distribution channels
-	clerks map[int64]int64                   // sequence number for each known client
-
+	distros map[int]map[int]chan RaftResponse // distribution channels
+	clients map[string]int64                   // sequence number for each known client
 	configs []Config // indexed by config num
 }
 
@@ -112,8 +111,8 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
-	sc.clerks = make(map[int64]int64)
-	sc.distro = make(map[int]map[int]chan RaftResponse)
+	sc.clients = make(map[string]int64)
+	sc.distros = make(map[int]map[int]chan RaftResponse)
 
 	go sc.executeLoop()
 	go sc.noopLoop()

@@ -2,6 +2,7 @@ package shardctrler
 
 import (
 	"fmt"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -9,8 +10,12 @@ import (
 	"6.824/raft"
 )
 
+const (
+	CTRLER_CLIENT_PREFIX = "CTRLER-CLI "
+)
+
 var (
-	NN int64
+	CtrlerClientGlobalId int64 // monotonically increasing for convenience
 )
 
 //
@@ -36,12 +41,9 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 }
 
 
-func nrand() int64 {
-	// max := big.NewInt(int64(1) << 62)
-	// bigx, _ := rand.Int(rand.Reader, max)
-	// x := bigx.Int64()
-	// return x
-	return atomic.AddInt64(&NN, 1)
+func GenerateClerkId() string {
+	CtrlerClientGlobalId++
+	return CTRLER_CLIENT_PREFIX + strconv.FormatInt(CtrlerClientGlobalId, 10)
 }
 
 func registerRPCs() {

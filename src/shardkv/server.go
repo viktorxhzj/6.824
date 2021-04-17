@@ -1,18 +1,12 @@
 package shardkv
 
+import (
+	"sync"
 
-import "6.824/labrpc"
-import "6.824/raft"
-import "sync"
-import "6.824/labgob"
-
-
-
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
-}
+	"6.824/labrpc"
+	"6.824/raft"
+	"6.824/shardctrler"
+)
 
 type ShardKV struct {
 	mu           sync.Mutex
@@ -21,32 +15,24 @@ type ShardKV struct {
 	applyCh      chan raft.ApplyMsg
 	make_end     func(string) *labrpc.ClientEnd
 	gid          int
-	ctrlers      []*labrpc.ClientEnd
+	// ctrlers      []*labrpc.ClientEnd
 	maxraftstate int // snapshot if log grows this big
+	dead         int32
+	scc          *shardctrler.Clerk
 
+	distros map[int]map[int]chan RaftResponse // distribution channels
+	clients map[string]int64                  // sequence number for each known client
+	state   map[string]string                 // state machine
 	// Your definitions here.
 }
 
-
-func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
+func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 	// Your code here.
 }
 
-func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 	// Your code here.
 }
-
-//
-// the tester calls Kill() when a ShardKV instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
-func (kv *ShardKV) Kill() {
-	kv.rf.Kill()
-	// Your code here, if desired.
-}
-
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -79,23 +65,28 @@ func (kv *ShardKV) Kill() {
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
-	labgob.Register(Op{})
+	registerRPCs()
 
 	kv := new(ShardKV)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 	kv.make_end = make_end
 	kv.gid = gid
-	kv.ctrlers = ctrlers
 
 	// Your initialization code here.
 
 	// Use something like this to talk to the shardctrler:
 	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
-
+	kv.scc = shardctrler.MakeClerk(ctrlers)
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	kv.state = make(map[string]string)
+	kv.clients = make(map[string]int64)
+	kv.distros = make(map[int]map[int]chan RaftResponse)
 
+	go kv.executeLoop()
+	go kv.noopLoop()
+	
 	return kv
 }

@@ -1,4 +1,4 @@
-package shardctrler
+package shardkv
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ func Debug(node int, format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [CTRLER %d]",
+	str := fmt.Sprintf("%v [KV %d]",
 		time.Now().Format("15:04:05.000"), node)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"

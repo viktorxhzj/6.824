@@ -26,9 +26,9 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse
 
 	ch := make(chan RaftResponse)
 	// Debug(sc.me, "开启通道[%d|%d]%+v {%+v}", idx, term, ch, *req)
-	if mm := sc.distro[idx]; mm == nil {
+	if mm := sc.distros[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
-		sc.distro[idx] = mm
+		sc.distros[idx] = mm
 		mm[term] = ch
 	} else {
 		mm[term] = ch
@@ -63,19 +63,19 @@ main:
 		Debug(sc.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
 		// No-op
 		if !ok {
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for _, v := range mm {
 				v <- RaftResponse{RPCInfo: FAILED_REQUEST}
 			}
-			delete(sc.distro, idx)
+			delete(sc.distros, idx)
 			sc.mu.Unlock()
 			continue main
 		}
-		seq := sc.clerks[r.Uid]
+		seq := sc.clients[r.Uid]
 
 		// 幂等性校验
 		if r.OpType != QUERY && r.Seq <= seq {
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for k, v := range mm {
 				if k == term {
 					v <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
@@ -83,18 +83,18 @@ main:
 					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
 				}
 			}
-			delete(sc.distro, idx)
+			delete(sc.distros, idx)
 			sc.mu.Unlock()
 			continue main
 		}
 
-		sc.clerks[r.Uid] = r.Seq
+		sc.clients[r.Uid] = r.Seq
 
 		switch r.OpType {
 		case JOIN:
 			servers := r.Input.(map[int][]string)
 			sc.joinGroups(servers)
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for k, v := range mm {
 				if k == term {
 					v <- RaftResponse{RPCInfo: SUCCESS}
@@ -106,7 +106,7 @@ main:
 		case LEAVE:
 			gids := r.Input.([]int)
 			sc.leaveGroups(gids)
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for k, v := range mm {
 				if k == term {
 					v <- RaftResponse{RPCInfo: SUCCESS}
@@ -118,7 +118,7 @@ main:
 		case MOVE:
 			movable := r.Input.(Movable)
 			sc.moveOneShard(movable)
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for k, v := range mm {
 				if k == term {
 					v <- RaftResponse{RPCInfo: SUCCESS}
@@ -136,7 +136,7 @@ main:
 				config = sc.configs[len(sc.configs)-1]
 			}
 			Debug(sc.me, "%+v", config)
-			mm := sc.distro[idx]
+			mm := sc.distros[idx]
 			for k, v := range mm {
 				if k == term {
 					v <- RaftResponse{RPCInfo: SUCCESS, Output: config}
@@ -145,7 +145,7 @@ main:
 				}
 			}
 		}
-		delete(sc.distro, idx)
+		delete(sc.distros, idx)
 		// Debug(sc.me, "Distro %+v", sc.distro)
 		sc.mu.Unlock()
 

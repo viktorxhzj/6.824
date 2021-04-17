@@ -8,7 +8,7 @@ package shardctrler
 // 	sc := new(ShardCtrler)
 // 	sc.configs = make([]Config, 1)
 // 	sc.configs[0].Groups = map[int][]string{}
-	
+
 // 	n := 10
 // 	for i := 0; i < n; i++ {
 // 		j := 500+i

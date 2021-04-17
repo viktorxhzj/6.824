@@ -1,5 +1,7 @@
 package shardkv
 
+import "fmt"
+
 //
 // Sharded key/value server.
 // Lots of replica groups, each running Raft.
@@ -10,35 +12,81 @@ package shardkv
 //
 
 const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongGroup  = "ErrWrongGroup"
-	ErrWrongLeader = "ErrWrongLeader"
+	GET    = "Get"
+	PUT    = "Put"
+	APPEND = "Append"
+	NIL = "Nil"
+
+	SUCCESS           = "成功"
+	NETWORK_FAILURE   = "超时"
+	WRONG_LEADER      = "错误领袖"
+	FAILED_REQUEST    = "失败重试"
+	DUPLICATE_REQUEST = "幂等拦截"
+	WRONG_GROUP       = "错误集群"
+
+	NO_OP_INTERVAL = 1000
 )
 
-type Err string
+type ClerkId struct {
+	Uid string
+	Seq int64
+}
+
+type RaftRequest struct {
+	Key    string
+	Value  string
+	OpType string
+	ClerkId
+}
+
+type RaftResponse struct {
+	Value   string
+	RPCInfo string
+}
 
 // Put or Append
-type PutAppendArgs struct {
-	// You'll have to add definitions here.
-	Key   string
-	Value string
-	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+type PutAppendRequest struct {
+	Key    string
+	Value  string
+	OpType string
+	ClerkId
 }
 
-type PutAppendReply struct {
-	Err Err
+type PutAppendResponse struct {
+	Key     string // redundant info
+	OpType  string // redundant info
+	ClerkId        // redundant info
+	RPCInfo string
 }
 
-type GetArgs struct {
+type GetRequest struct {
 	Key string
-	// You'll have to add definitions here.
+	ClerkId
 }
 
-type GetReply struct {
-	Err   Err
-	Value string
+type GetResponse struct {
+	Key     string // redundant info
+	Value   string
+	ClerkId // redundant info
+	RPCInfo string
+}
+
+func (c ClerkId) String() string {
+	return fmt.Sprintf("[%s|SEQ-%d]", c.Uid, c.Seq)
+}
+
+func (r PutAppendRequest) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[%s K-%s V-%s]", r.OpType, r.Key, r.Value)
+}
+
+func (r PutAppendResponse) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[%s K-%s %s]", r.OpType, r.Key, r.RPCInfo)
+}
+
+func (r GetRequest) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[Get K-%s]", r.Key)
+}
+
+func (r GetResponse) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[Get K-%s %s]", r.Key, r.RPCInfo)
 }

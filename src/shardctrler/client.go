@@ -20,7 +20,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	ck.size = len(servers)
-	ck.Uid = nrand()
+	ck.Uid = GenerateClerkId()
 	return ck
 }
 
