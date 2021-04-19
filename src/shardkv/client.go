@@ -57,12 +57,12 @@ func (ck *Clerk) Get(key string) string {
 		},
 	}
 	shard := key2shard(key)
-	CDebug(ck.Uid, "开始%+v,分片%d", req, shard)
+	ck.Log(ck.Uid, "开始%+v,分片%d", req, shard)
 	for {
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
 			// try each server for the shard.
-			CDebug(ck.Uid, "%+v轮询GID%d", req, gid)
+			ck.Log(ck.Uid, "%+v轮询GID%d", req, gid)
 		round:
 			for si := 0; si < len(servers); si++ {
 				var resp GetResponse
@@ -72,7 +72,7 @@ func (ck *Clerk) Get(key string) string {
 				}
 				resp.Key = req.Key
 				resp.ClerkId = req.ClerkId
-				CDebug(ck.Uid, "%+v", resp)
+				ck.Log(ck.Uid, "%+v", resp)
 				switch resp.RPCInfo {
 				case SUCCESS:
 					return resp.Value
@@ -106,12 +106,12 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		OpType: op,
 	}
 	shard := key2shard(key)
-	CDebug(ck.Uid, "开始%+v,分片%d", req, shard)
+	ck.Log(ck.Uid, "开始%+v,分片%d", req, shard)
 
 	for {
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
-			CDebug(ck.Uid, "%+v轮询GID%d", req, gid)
+			ck.Log(ck.Uid, "%+v轮询GID%d", req, gid)
 		round:
 			for si := 0; si < len(servers); si++ {
 				var resp PutAppendResponse
@@ -122,7 +122,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				resp.Key = req.Key
 				resp.OpType = req.OpType
 				resp.ClerkId = req.ClerkId
-				CDebug(ck.Uid, "%+v", resp)
+				ck.Log(ck.Uid, "%+v", resp)
 				switch resp.RPCInfo {
 				case SUCCESS:
 					return

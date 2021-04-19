@@ -2,6 +2,7 @@ package shardkv
 
 import (
 	"sync"
+	"time"
 
 	"6.824/labrpc"
 	"6.824/raft"
@@ -21,10 +22,14 @@ type ShardKV struct {
 	scc          *shardctrler.Clerk
 	config       shardctrler.Config // latest config
 
-	distros map[int]map[int]chan RaftResponse      // distribution channels
-	clients map[string]int64                       // sequence number for each known client
-	state   [shardctrler.NShards]map[string]string // state machine
-	status  int
+	distros      map[int]map[int]chan RaftResponse      // distribution channels
+	clients      map[string]int64                       // sequence number for each known client
+	stateMachine [shardctrler.NShards]map[string]string // state machine
+
+	lockTime time.Time
+	lockName string
+
+	status       int
 	// Your definitions here.
 }
 
@@ -95,8 +100,6 @@ func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
-	registerRPCs()
-
 	kv := new(ShardKV)
 	kv.me = me
 	kv.maxraftstate = maxraftstate

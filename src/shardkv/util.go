@@ -1,8 +1,10 @@
 package shardkv
 
 import (
+	"fmt"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"6.824/labgob"
 	"6.824/raft"
@@ -17,11 +19,21 @@ var (
 	KVClientGlobalId int64
 )
 
-//
-// which shard is a key in?
-// please use this function,
-// and please do not change it.
-//
+func (kv *ShardKV) lock(namespace string) {
+	kv.mu.Lock()
+	kv.lockName = namespace
+	kv.lockTime = time.Now()
+	kv.Log("LOCK[%s]", namespace)
+}
+
+func (kv *ShardKV) unlock() {
+	if d := time.Since(kv.lockTime); d >= 2 * time.Millisecond {
+		panic(fmt.Sprintf("UNLOCK[%s] too long", kv.lockName))
+	}
+	kv.Log("UNLOCK[%s]", kv.lockName)
+	kv.mu.Unlock()
+}
+
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -36,12 +48,6 @@ func GenerateClerkId() string {
 	return KV_CLIENT_PREFIX + strconv.FormatInt(KVClientGlobalId, 10)
 }
 
-//
-// the tester calls Kill() when a ShardKV instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
 func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
@@ -53,7 +59,7 @@ func (kv *ShardKV) killed() bool {
 	return z == 1
 }
 
-func registerRPCs() {
+func init() {
 	labgob.Register(GetRequest{})
 	labgob.Register(GetResponse{})
 

@@ -14,11 +14,26 @@ import (
 
 const (
 	KV_CLIENT_PREFIX = "CLI "
+	LOCK_TIMEOUT     = 1000 * time.Millisecond
 )
 
 var (
 	KVClientGlobalId int64
 )
+
+func (kv *KVServer) lock(namespace string) {
+	kv.mu.Lock()
+	kv.lockName = namespace
+	kv.lockTime = time.Now()
+	kv.Log("LOCK[%s]", namespace)
+}
+
+func (kv *KVServer) unlock() {
+	if d := time.Since(kv.lockTime); d >= LOCK_TIMEOUT {
+		panic(fmt.Sprintf("[KV %d] UNLOCK[%s] too long, cost %+v", kv.me, kv.lockName, d))
+	}
+	kv.mu.Unlock()
+}
 
 func GenerateClerkId() string {
 	KVClientGlobalId++
@@ -36,7 +51,7 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
-func registerRPCs() {
+func init() {
 	labgob.Register(GetRequest{})
 	labgob.Register(GetResponse{})
 

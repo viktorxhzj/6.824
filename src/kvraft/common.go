@@ -9,7 +9,8 @@ const (
 	NIL    = "Nil"
 
 	SUCCESS           = "成功"
-	NETWORK_FAILURE   = "超时"
+	NETWORK_FAILURE   = "网络超时"
+	SERVER_TIMEOUT    = "内部超时"
 	WRONG_LEADER      = "非法领袖"
 	FAILED_REQUEST    = "失败重试"
 	DUPLICATE_REQUEST = "幂等拦截"

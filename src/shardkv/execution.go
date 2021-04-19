@@ -95,8 +95,8 @@ main:
 		switch r.OpType {
 		case GET:
 			var val string
-			if kv.state[s] != nil {
-				val = kv.state[s][r.Key]
+			if kv.stateMachine[s] != nil {
+				val = kv.stateMachine[s][r.Key]
 			}
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
@@ -109,11 +109,11 @@ main:
 			}
 
 		case PUT:
-			if kv.state[s] == nil {
-				kv.state[s] = make(map[string]string)
+			if kv.stateMachine[s] == nil {
+				kv.stateMachine[s] = make(map[string]string)
 			}
-			kv.state[s][r.Key] = r.Value
-			val := kv.state[s][r.Key]
+			kv.stateMachine[s][r.Key] = r.Value
+			val := kv.stateMachine[s][r.Key]
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -125,8 +125,8 @@ main:
 			}
 
 		case APPEND:
-			kv.state[s][r.Key] = kv.state[s][r.Key] + r.Value
-			val := kv.state[s][r.Key]
+			kv.stateMachine[s][r.Key] = kv.stateMachine[s][r.Key] + r.Value
+			val := kv.stateMachine[s][r.Key]
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -223,7 +223,7 @@ func (kv *ShardKV) serializeState() []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.clients)
-	e.Encode(kv.state)
+	e.Encode(kv.stateMachine)
 	return w.Bytes()
 }
 
@@ -240,6 +240,6 @@ func (kv *ShardKV) deserializeState(data []byte) {
 		panic("BAD KV PERSIST")
 	} else {
 		kv.clients = clients
-		kv.state = state
+		kv.stateMachine = state
 	}
 }

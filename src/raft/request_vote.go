@@ -135,13 +135,6 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 			} else {
 				lastLogIndex = rf.lastIncludedIndex
 			}
-			// 当选时，自动填充一个空 LogEntry
-			// lastLogIndex++
-			// rf.logs = append(rf.logs, LogEntry{
-			// 	Index: lastLogIndex,
-			// 	Term:  rf.currentTerm,
-			// })
-			// rf.persist()
 
 			for i := 0; i < rf.size; i++ {
 				// nextIndex[]: initialize to leader last logger index + 1

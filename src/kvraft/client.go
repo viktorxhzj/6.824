@@ -55,12 +55,12 @@ func (ck *Clerk) Get(key string) string {
 	for {
 		// try each known server.
 		for range ck.servers {
-			CDebug(ck.Uid, "开始Get%+v [KV %d]", req, i)
+			ck.Log("开始Get%+v [KV %d]", req, i)
 			var resp GetResponse
 			ck.servers[i].Call("KVServer.Get", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
 				ck.recentLeader = i
-				CDebug(ck.Uid, "成功Get%+v", req)
+				ck.Log("成功Get%+v", req)
 				return resp.Value
 			}
 			i = (i + 1) % ck.size
@@ -97,15 +97,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	for {
 		// try each known server.
 		for range ck.servers {
-			CDebug(ck.Uid, "开始PutAppend%+v [KV %d]", req, i)
+			ck.Log("开始PutAppend%+v [KV %d]", req, i)
 			var resp GetResponse
 			ck.servers[i].Call("KVServer.PutAppend", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
 				ck.recentLeader = i
-				CDebug(ck.Uid, "成功PutAppend%+v", req)
+				ck.Log("成功PutAppend%+v", req)
 				return
 			} else if resp.RPCInfo == DUPLICATE_REQUEST {
-				CDebug(ck.Uid, "幂等拦截%+v", req)
+				ck.Log("幂等拦截%+v", req)
 				return
 			}
 			i = (i + 1) % ck.size

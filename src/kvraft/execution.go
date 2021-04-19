@@ -7,27 +7,28 @@ import (
 	"6.824/labgob"
 )
 
-func (kv *KVServer) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse) {
+const APPLY_TIMEOUT = 500 * time.Millisecond
+
+func (kv *KVServer) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
 
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-	kv.mu.Lock()
+	kv.lock("try apply")
 	var idx, term int
 	var ok bool
 	switch req.OpType {
 	case NIL:
 		idx, term, ok = kv.rf.Start(nil)
 	default:
-		idx, term, ok = kv.rf.Start(*req)
+		idx, term, ok = kv.rf.Start(req)
 	}
 
 	if !ok {
-		kv.mu.Unlock()
+		kv.unlock()
 		resp.RPCInfo = WRONG_LEADER
 		return
 	}
 
 	ch := make(chan RaftResponse)
-	Debug(kv.me, "开启通道[%d|%d]%+v", idx, term, ch)
 	if mm := kv.distros[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
 		kv.distros[idx] = mm
@@ -35,14 +36,30 @@ func (kv *KVServer) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse) {
 	} else {
 		mm[term] = ch
 	}
-	kv.mu.Unlock()
+	kv.unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	rr := <-ch
-	close(ch)
-	resp.Value = rr.Value
-	resp.RPCInfo = rr.RPCInfo
-	Debug(kv.me, "关闭通道[%d|%d]%+v", idx, term, ch)
+	t := time.NewTimer(APPLY_TIMEOUT)
+	defer t.Stop()
+	select {
+	case resp = <-ch:
+		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+		kv.removeDistro(idx, term)
+		/*--------------------CRITICAL SECTION--------------------*/
+		return
+	case <-t.C:
+		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+		kv.removeDistro(idx, term)
+		/*--------------------CRITICAL SECTION--------------------*/
+		resp.RPCInfo = SERVER_TIMEOUT
+		return
+	}
+}
+
+func (kv *KVServer) removeDistro(idx, term int) {
+	kv.lock("remove distro")
+	delete(kv.distros[idx], term)
+	kv.unlock()
 }
 
 func (kv *KVServer) executeLoop() {
@@ -57,57 +74,31 @@ main:
 		msg := <-kv.applyCh
 
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		kv.mu.Lock()
+		kv.lock("execute loop")
 
 		// deal with snapshot
 		if msg.SnapshotValid {
-			Debug(kv.me, "收到快照{...=>[%d|%d]", msg.SnapshotIndex, msg.SnapshotTerm)
-
+			kv.Log("收到快照{...=>[%d|%d]", msg.SnapshotIndex, msg.SnapshotTerm)
 			if kv.rf.CondInstallSnapshot(msg.SnapshotTerm, msg.SnapshotIndex, msg.Snapshot) {
 				kv.deserializeState(msg.Snapshot)
-				ii := msg.SnapshotIndex
-				for idx, v := range kv.distros {
-					if idx <= ii {
-						for term, vv := range v {
-							vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
-							delete(v, term)
-						}
-						delete(kv.distros, idx)
-					}
-				}
+				kv.cleanDistros(msg.SnapshotIndex)
 			}
-			kv.mu.Unlock()
+			kv.unlock()
 			continue main
 		}
 
 		idx, term := msg.CommandIndex, msg.CommandTerm
-		r, ok := msg.Command.(RaftRequest)
-		Debug(kv.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
-
-		// 空日志处理
-		if !ok {
-			mm := kv.distros[idx]
-			for _, v := range mm {
-				v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-			}
-			delete(kv.distros, idx)
-			kv.mu.Unlock()
-			continue main
-		}
+		r := msg.Command.(RaftRequest)
+		kv.Log("收到日志[%d|%d] {%+v}", idx, term, msg.Command)
 
 		// 幂等性校验
 		seq := kv.clients[r.Uid]
 		if r.OpType != GET && r.Seq <= seq {
-			mm := kv.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := kv.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
+				delete(kv.distros[idx], term)
 			}
-			delete(kv.distros, idx)
-			kv.mu.Unlock()
+			kv.unlock()
 			continue main
 		}
 
@@ -116,74 +107,52 @@ main:
 		switch r.OpType {
 		case GET:
 			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			//kv.Log("RELATED STATE=[K:%s V:%s]", r.Key, val)
+			if ch, ok := kv.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS, Value: val}
+				delete(kv.distros[idx], term)
 			}
 
 		case PUT:
 			kv.state[r.Key] = r.Value
 			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			//kv.Log("RELATED STATE=[K:%s V:%s]", r.Key, val)
+			if ch, ok := kv.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS, Value: val}
+				delete(kv.distros[idx], term)
 			}
 
 		case APPEND:
 			kv.state[r.Key] = kv.state[r.Key] + r.Value
 			val := kv.state[r.Key]
-			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
-			mm := kv.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Value: val}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			//kv.Log("RELATED STATE=[K:%s V:%s]", r.Key, val)
+			if ch, ok := kv.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS, Value: val}
+				delete(kv.distros[idx], term)
 			}
 		}
-		delete(kv.distros, idx)
 
 		// should snapshot?
 		if kv.maxraftstate != -1 && kv.rf.ShouldSnapshot(kv.maxraftstate) {
 			stateBytes := kv.serializeState()
-			ii := msg.CommandIndex
-			for idx, v := range kv.distros {
-				if idx <= ii {
-					for term, vv := range v {
-						vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
-						delete(v, term)
-					}
-					delete(kv.distros, idx)
-				}
-			}
+			kv.cleanDistros(msg.CommandIndex)
 			kv.rf.Snapshot(msg.CommandIndex, stateBytes)
 		}
 
-		//Debug(kv.me, "Distro %+v", kv.distro)
-		kv.mu.Unlock()
+		kv.unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 	}
 }
 
-func (kv *KVServer) noopLoop() {
-
-	for !kv.killed() {
-		time.Sleep(NO_OP_INTERVAL * time.Millisecond)
-		req := RaftRequest{OpType: NIL}
-		resp := RaftResponse{}
-		Debug(kv.me, "Periodically No-Op")
-		go kv.tryApplyAndGetResult(&req, &resp)
+func (kv *KVServer) cleanDistros(uptoIdx int) {
+	for idx, v := range kv.distros {
+		if idx <= uptoIdx {
+			for term, vv := range v {
+				vv <- RaftResponse{RPCInfo: FAILED_REQUEST}
+				delete(v, term)
+			}
+			delete(kv.distros, idx)
+		}
 	}
 }
 

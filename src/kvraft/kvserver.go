@@ -2,6 +2,7 @@ package kvraft
 
 import (
 	"sync"
+	"time"
 
 	"6.824/labrpc"
 	"6.824/raft"
@@ -13,6 +14,9 @@ type KVServer struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32
+
+	lockName string
+	lockTime time.Time
 
 	maxraftstate int // snapshot if log grows this big
 
@@ -36,8 +40,6 @@ type KVServer struct {
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
-	registerRPCs()
-
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
@@ -48,20 +50,21 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.executeLoop()
-	go kv.noopLoop()
 
 	return kv
 }
 
 func (kv *KVServer) Get(args *GetRequest, reply *GetResponse) {
+	defer func() {
+		kv.Debug("Get RPC returns, %+v", *reply)
+	}()
 	req := RaftRequest{
 		Key:     args.Key,
 		ClerkId: args.ClerkId,
 		OpType:  GET,
 	}
-	resp := RaftResponse{}
-
-	kv.tryApplyAndGetResult(&req, &resp)
+	
+	resp := kv.tryApplyAndGetResult(req)
 
 	// for debug printing
 	reply.Key = args.Key
@@ -71,16 +74,17 @@ func (kv *KVServer) Get(args *GetRequest, reply *GetResponse) {
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
-
+	defer func() {
+		kv.Debug("PutAppend RPC returns, %+v", *reply)
+	}()
 	req := RaftRequest{
 		Key:     args.Key,
 		Value:   args.Value,
 		ClerkId: args.ClerkId,
 		OpType:  args.OpType,
 	}
-	resp := RaftResponse{}
-
-	kv.tryApplyAndGetResult(&req, &resp)
+	
+	resp := kv.tryApplyAndGetResult(req)
 
 	// for debug printing
 	reply.Key = args.Key
