@@ -3,6 +3,7 @@ package shardctrler
 import (
 	"fmt"
 	"strconv"
+	"time"
 )
 
 //
@@ -33,20 +34,8 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
-func (c Config) String() string {
-	var str string
-	for i, g := range c.Shards {
-		str += strconv.Itoa(g)
-		if i != NShards - 1 {
-			str += "|"
-		}
-	}
-	return fmt.Sprintf("CONF %d [%s]", c.Num, str)
-}
-
-const (
-	OK = "OK"
-)
+const CLIENT_REQUEST_INTERVAL = 100 * time.Millisecond
+const APPLY_TIMEOUT = 500 * time.Millisecond
 
 const (
 	JOIN  = "Join"
@@ -56,7 +45,8 @@ const (
 	NIL   = "NIL"
 
 	SUCCESS           = "成功"
-	NETWORK_FAILURE   = "超时"
+	NETWORK_FAILURE   = "网络超时"
+	SERVER_TIMEOUT    = "内部超时"
 	WRONG_LEADER      = "错误领袖"
 	FAILED_REQUEST    = "失败重试"
 	DUPLICATE_REQUEST = "幂等拦截"
@@ -68,12 +58,6 @@ type ClerkId struct {
 	Uid string
 	Seq int64
 }
-
-func (c ClerkId) String() string {
-	return fmt.Sprintf("[%s SEQ-%d]", c.Uid, c.Seq)
-}
-
-type Err string
 
 type JoinRequest struct {
 	Servers map[int][]string // new GID -> servers mappings
@@ -123,6 +107,26 @@ type RaftRequest struct {
 	Input interface{}
 }
 
+type RaftResponse struct {
+	Output  interface{}
+	RPCInfo string
+}
+
+func (c Config) String() string {
+	var str string
+	for i, g := range c.Shards {
+		str += strconv.Itoa(g)
+		if i != NShards - 1 {
+			str += "|"
+		}
+	}
+	return fmt.Sprintf("CONF %d [%s]", c.Num, str)
+}
+
+func (c ClerkId) String() string {
+	return fmt.Sprintf("[%s SEQ-%d]", c.Uid, c.Seq)
+}
+
 func (r RaftRequest) String() string {
 	str := r.ClerkId.String()
 	switch v := r.Input.(type) {
@@ -148,9 +152,4 @@ func (r RaftRequest) String() string {
 	}
 
 	return str
-}
-
-type RaftResponse struct {
-	Output  interface{}
-	RPCInfo string
 }

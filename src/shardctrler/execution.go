@@ -5,27 +5,26 @@ import (
 	"time"
 )
 
-func (sc *ShardCtrler) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse) {
+func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
 
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-	sc.mu.Lock()
+	sc.lock("try apply")
 	var idx, term int
 	var ok bool
 	switch req.OpType {
 	case NIL:
 		idx, term, ok = sc.rf.Start(nil)
 	default:
-		idx, term, ok = sc.rf.Start(*req)
+		idx, term, ok = sc.rf.Start(req)
 	}
 
 	if !ok {
-		sc.mu.Unlock()
+		sc.unlock()
 		resp.RPCInfo = WRONG_LEADER
 		return
 	}
 
 	ch := make(chan RaftResponse)
-	// Debug(sc.me, "开启通道[%d|%d]%+v {%+v}", idx, term, ch, *req)
 	if mm := sc.distros[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
 		sc.distros[idx] = mm
@@ -33,14 +32,30 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req *RaftRequest, resp *RaftResponse
 	} else {
 		mm[term] = ch
 	}
-	sc.mu.Unlock()
+	sc.unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	rr := <-ch
-	close(ch)
-	resp.Output = rr.Output
-	resp.RPCInfo = rr.RPCInfo
-	// Debug(sc.me, "关闭通道[%d|%d]%+v {%+v %+v}", idx, term, ch, req.ClerkId, req.OpType)
+	t := time.NewTimer(APPLY_TIMEOUT)
+	defer t.Stop()
+	select {
+	case resp = <-ch:
+		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+		sc.removeDistro(idx, term)
+		/*--------------------CRITICAL SECTION--------------------*/
+		return
+	case <-t.C:
+		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
+		sc.removeDistro(idx, term)
+		/*--------------------CRITICAL SECTION--------------------*/
+		resp.RPCInfo = SERVER_TIMEOUT
+		return
+	}
+}
+
+func (sc *ShardCtrler) removeDistro(idx, term int) {
+	sc.lock("remove distro")
+	delete(sc.distros[idx], term)
+	sc.unlock()
 }
 
 func (sc *ShardCtrler) executeLoop() {
@@ -51,7 +66,7 @@ main:
 		msg := <-sc.applyCh
 
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		sc.mu.Lock()
+		sc.lock("execute loop")
 
 		// deal with snapshot
 		if msg.SnapshotValid {
@@ -59,32 +74,16 @@ main:
 		}
 		// deal with commands
 		idx, term := msg.CommandIndex, msg.CommandTerm
-		r, ok := msg.Command.(RaftRequest)
-		Debug(sc.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
-		// No-op
-		if !ok {
-			mm := sc.distros[idx]
-			for _, v := range mm {
-				v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-			}
-			delete(sc.distros, idx)
-			sc.mu.Unlock()
-			continue main
-		}
-		seq := sc.clients[r.Uid]
+		r := msg.Command.(RaftRequest)
 
 		// 幂等性校验
+		seq := sc.clients[r.Uid]
 		if r.OpType != QUERY && r.Seq <= seq {
-			mm := sc.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := sc.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
+				delete(sc.distros[idx], term)
 			}
-			delete(sc.distros, idx)
-			sc.mu.Unlock()
+			sc.unlock()
 			continue main
 		}
 
@@ -94,37 +93,25 @@ main:
 		case JOIN:
 			servers := r.Input.(map[int][]string)
 			sc.joinGroups(servers)
-			mm := sc.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := sc.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS}
+				delete(sc.distros[idx], term)
 			}
 
 		case LEAVE:
 			gids := r.Input.([]int)
 			sc.leaveGroups(gids)
-			mm := sc.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := sc.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS}
+				delete(sc.distros[idx], term)
 			}
 
 		case MOVE:
 			movable := r.Input.(Movable)
 			sc.moveOneShard(movable)
-			mm := sc.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := sc.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS}
+				delete(sc.distros[idx], term)
 			}
 
 		case QUERY:
@@ -135,32 +122,13 @@ main:
 			} else {
 				config = sc.configs[len(sc.configs)-1]
 			}
-			Debug(sc.me, "%+v", config)
-			mm := sc.distros[idx]
-			for k, v := range mm {
-				if k == term {
-					v <- RaftResponse{RPCInfo: SUCCESS, Output: config}
-				} else {
-					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
-				}
+			if ch, ok := sc.distros[idx][term]; ok {
+				ch <- RaftResponse{RPCInfo: SUCCESS, Output: config}
+				delete(sc.distros[idx], term)
 			}
 		}
-		delete(sc.distros, idx)
-		// Debug(sc.me, "Distro %+v", sc.distro)
-		sc.mu.Unlock()
-
+		sc.unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
-	}
-}
-
-func (sc *ShardCtrler) noopLoop() {
-
-	for !sc.killed() {
-		time.Sleep(NO_OP_INTERVAL * time.Millisecond)
-		req := RaftRequest{OpType: NIL}
-		resp := RaftResponse{}
-		Debug(sc.me, "Periodically No-Op")
-		go sc.tryApplyAndGetResult(&req, &resp)
 	}
 }
 
@@ -214,7 +182,6 @@ func (sc *ShardCtrler) joinGroups(servers map[int][]string) {
 	}
 
 	reallocSlots(&newConfig, &gids)
-	Debug(sc.me, "%+v", newConfig)
 	sc.configs = append(sc.configs, newConfig)
 }
 
@@ -241,7 +208,6 @@ func (sc *ShardCtrler) leaveGroups(lgids []int) {
 	}
 
 	reallocSlots(&newConfig, &gids)
-	Debug(sc.me, "%+v", newConfig)
 	sc.configs = append(sc.configs, newConfig)
 }
 

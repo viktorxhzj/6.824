@@ -8,28 +8,17 @@ import (
 )
 
 var (
-	EnableDebug   = 1
+	EnableDebug   = 0
 	EnableConsole = 1
 	EnableFile    = 0
 )
 
-func Debug(node int, format string, info ...interface{}) {
-	if EnableDebug == 0 {
-		return
-	}
-	str := fmt.Sprintf("%v [CTRLER %d]",
-		time.Now().Format("15:04:05.000"), node)
-	str += fmt.Sprintf(format, info...)
-	str += "\n"
-	write(str)
-}
-
-func CDebug(client string, format string, info ...interface{}) {
+func (ck *Clerk) Log(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
 	str := fmt.Sprintf("%v [%s]",
-		time.Now().Format("15:04:05.000"), client)
+		time.Now().Format("15:04:05.000"), ck.Uid)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)

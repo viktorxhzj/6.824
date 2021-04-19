@@ -1,6 +1,9 @@
 package kvraft
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	GET    = "Get"
@@ -14,9 +17,10 @@ const (
 	WRONG_LEADER      = "非法领袖"
 	FAILED_REQUEST    = "失败重试"
 	DUPLICATE_REQUEST = "幂等拦截"
-
-	NO_OP_INTERVAL = 1000
 )
+
+const CLIENT_REQUEST_INTERVAL = 100 * time.Millisecond
+const APPLY_TIMEOUT = 500 * time.Millisecond
 
 type ClerkId struct {
 	Uid string

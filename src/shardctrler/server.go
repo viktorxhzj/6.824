@@ -1,9 +1,11 @@
 package shardctrler
 
 import (
+	"sync"
+	"time"
+
 	"6.824/labrpc"
 	"6.824/raft"
-	"sync"
 )
 
 type ShardCtrler struct {
@@ -12,6 +14,8 @@ type ShardCtrler struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32
+	lockName string
+	lockTime time.Time
 
 	// Your data here.
 	distros map[int]map[int]chan RaftResponse // distribution channels
@@ -30,8 +34,7 @@ func (sc *ShardCtrler) Join(args *JoinRequest, reply *JoinResponse) {
 		ClerkId: args.ClerkId,
 		Input:   args.Servers,
 	}
-	resp := RaftResponse{}
-	sc.tryApplyAndGetResult(&req, &resp)
+	resp := sc.tryApplyAndGetResult(req)
 	reply.RPCInfo = resp.RPCInfo
 }
 
@@ -42,8 +45,7 @@ func (sc *ShardCtrler) Leave(args *LeaveRequest, reply *LeaveResponse) {
 		ClerkId: args.ClerkId,
 		Input:   args.GIDs,
 	}
-	resp := RaftResponse{}
-	sc.tryApplyAndGetResult(&req, &resp)
+	resp := sc.tryApplyAndGetResult(req)
 	reply.RPCInfo = resp.RPCInfo
 }
 
@@ -54,8 +56,7 @@ func (sc *ShardCtrler) Move(args *MoveRequest, reply *MoveResponse) {
 		ClerkId: args.ClerkId,
 		Input:   args.Movable,
 	}
-	resp := RaftResponse{}
-	sc.tryApplyAndGetResult(&req, &resp)
+	resp := sc.tryApplyAndGetResult(req)
 	reply.RPCInfo = resp.RPCInfo
 }
 
@@ -66,8 +67,7 @@ func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 		ClerkId: args.ClerkId,
 		Input:   args.Num,
 	}
-	resp := RaftResponse{}
-	sc.tryApplyAndGetResult(&req, &resp)
+	resp := sc.tryApplyAndGetResult(req)
 	if resp.RPCInfo != SUCCESS {
 		reply.RPCInfo = resp.RPCInfo
 		return
@@ -100,8 +100,6 @@ func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 // me is the index of the current server in servers[].
 //
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister) *ShardCtrler {
-	registerRPCs()
-
 	sc := new(ShardCtrler)
 	sc.me = me
 
@@ -115,7 +113,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.distros = make(map[int]map[int]chan RaftResponse)
 
 	go sc.executeLoop()
-	go sc.noopLoop()
 
 	return sc
 }

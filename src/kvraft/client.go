@@ -6,10 +6,6 @@ import (
 	"6.824/labrpc"
 )
 
-const (
-	CLIENT_ROUND_INTERVAL = 100
-)
-
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	size int
@@ -65,7 +61,7 @@ func (ck *Clerk) Get(key string) string {
 			}
 			i = (i + 1) % ck.size
 		}
-		time.Sleep(CLIENT_ROUND_INTERVAL * time.Millisecond)
+		time.Sleep(CLIENT_REQUEST_INTERVAL)
 	}
 }
 
@@ -110,7 +106,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			}
 			i = (i + 1) % ck.size
 		}
-		time.Sleep(CLIENT_ROUND_INTERVAL * time.Millisecond)
+		time.Sleep(CLIENT_REQUEST_INTERVAL)
 	}
 }
 

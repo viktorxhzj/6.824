@@ -12,18 +12,26 @@ import (
 
 const (
 	CTRLER_CLIENT_PREFIX = "CTRLER-CLI "
+	LOCK_TIMEOUT     = 1000 * time.Millisecond
 )
 
 var (
 	CtrlerClientGlobalId int64 // monotonically increasing for convenience
 )
 
-//
-// the tester calls Kill() when a ShardCtrler instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
+func (sc *ShardCtrler) lock(namespace string) {
+	sc.mu.Lock()
+	sc.lockName = namespace
+	sc.lockTime = time.Now()
+}
+
+func (sc *ShardCtrler) unlock() {
+	if d := time.Since(sc.lockTime); d >= LOCK_TIMEOUT {
+		panic(fmt.Sprintf("[KV %d] UNLOCK[%s] too long, cost %+v", sc.me, sc.lockName, d))
+	}
+	sc.mu.Unlock()
+}
+
 func (sc *ShardCtrler) Kill() {
 	atomic.StoreInt32(&sc.dead, 1)
 	sc.rf.Kill()
@@ -46,7 +54,7 @@ func GenerateClerkId() string {
 	return CTRLER_CLIENT_PREFIX + strconv.FormatInt(CtrlerClientGlobalId, 10)
 }
 
-func registerRPCs() {
+func init() {
 	labgob.Register(JoinRequest{})
 	labgob.Register(JoinResponse{})
 

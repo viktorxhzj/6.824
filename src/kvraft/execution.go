@@ -7,7 +7,6 @@ import (
 	"6.824/labgob"
 )
 
-const APPLY_TIMEOUT = 500 * time.Millisecond
 
 func (kv *KVServer) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
 
