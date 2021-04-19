@@ -21,16 +21,16 @@ var (
 
 func (kv *ShardKV) lock(namespace string) {
 	kv.mu.Lock()
-	kv.lockName = namespace
-	kv.lockTime = time.Now()
+	kv.lockname = namespace
+	kv.locktime = time.Now()
 	kv.Log("LOCK[%s]", namespace)
 }
 
 func (kv *ShardKV) unlock() {
-	if d := time.Since(kv.lockTime); d >= 2 * time.Millisecond {
-		panic(fmt.Sprintf("UNLOCK[%s] too long", kv.lockName))
+	if d := time.Since(kv.locktime); d >= 2 * time.Millisecond {
+		panic(fmt.Sprintf("UNLOCK[%s] too long", kv.lockname))
 	}
-	kv.Log("UNLOCK[%s]", kv.lockName)
+	kv.Log("UNLOCK[%s]", kv.lockname)
 	kv.mu.Unlock()
 }
 
@@ -51,6 +51,7 @@ func GenerateClerkId() string {
 func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
+	kv.Debug("")
 	// Your code here, if desired.
 }
 

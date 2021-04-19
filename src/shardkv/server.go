@@ -10,62 +10,75 @@ import (
 )
 
 type ShardKV struct {
+	// 互斥锁相关字段
 	mu       sync.Mutex
-	me       int
-	rf       *raft.Raft
-	applyCh  chan raft.ApplyMsg
-	make_end func(string) *labrpc.ClientEnd
-	gid      int
-	// ctrlers      []*labrpc.ClientEnd
-	maxraftstate int // snapshot if log grows this big
-	dead         int32
-	scc          *shardctrler.Clerk
-	config       shardctrler.Config // latest config
+	locktime time.Time
+	lockname string
 
-	distros      map[int]map[int]chan RaftResponse      // distribution channels
+	// 集群相关信息
+	me       int                // 该节点在所在集群中的Id
+	gid      int                // 所在集群的全局Id
+	scc      *shardctrler.Clerk // 配置集群的客户端
+	make_end func(string) *labrpc.ClientEnd
+	// ctrlers      []*labrpc.ClientEnd
+
+
+	// 持久化信息
 	clients      map[string]int64                       // sequence number for each known client
 	stateMachine [shardctrler.NShards]map[string]string // state machine
+	lastAppliedIdx int
+	conf     shardctrler.Config // latest config
+	prevConf shardctrler.Config // previous config
 
-	lockTime time.Time
-	lockName string
 
-	status       int
-	// Your definitions here.
+	rf           *raft.Raft
+	applyCh      chan raft.ApplyMsg
+	maxraftstate int // snapshot if log grows this big
+	dead         int32
+
+	distros      map[int]map[int]chan GeneralOutput      // distribution channels
+
 }
 
 func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
-	// Your code here.
-	req := RaftRequest{
-		Key:     args.Key,
-		ClerkId: args.ClerkId,
-		OpType:  GET,
+	defer func() {
+		kv.Debug("Get RPC returns, %+v", *reply)
+	}()
+
+	req := GeneralInput{
+		OpType: GET,
+		Input: *args,
 	}
-	resp := RaftResponse{}
 
-	kv.tryApplyAndGetResult(&req, &resp)
-
+	resp := kv.tryApplyAndGetResult(req)
+	if reply.RPCInfo = resp.RPCInfo; reply.RPCInfo != SUCCEEDED_REQUEST {
+		return
+	}
+	// for debug printing
 	reply.Key = args.Key
 	reply.ClerkId = args.ClerkId
-	reply.Value = resp.Value
-	reply.RPCInfo = resp.RPCInfo
+	reply.Value = resp.Output.(string)
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
-	// Your code here.
-	req := RaftRequest{
-		Key:     args.Key,
-		Value:   args.Value,
-		ClerkId: args.ClerkId,
-		OpType:  args.OpType,
+	defer func() {
+		kv.Debug("PutAppend RPC returns, %+v", *reply)
+	}()
+
+	req := GeneralInput{
+		OpType: args.OpType,
+		Input: *args,
 	}
-	resp := RaftResponse{}
 
-	kv.tryApplyAndGetResult(&req, &resp)
-
+	resp := kv.tryApplyAndGetResult(req)
+	if reply.RPCInfo = resp.RPCInfo; reply.RPCInfo != SUCCEEDED_REQUEST {
+		return
+	}
+	// for debug printing
 	reply.Key = args.Key
 	reply.ClerkId = args.ClerkId
 	reply.OpType = args.OpType
-	reply.Value = resp.Value
+	reply.Value = resp.Output.(string)
 	reply.RPCInfo = resp.RPCInfo
 }
 
@@ -105,20 +118,15 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.maxraftstate = maxraftstate
 	kv.make_end = make_end
 	kv.gid = gid
-
-	// Your initialization code here.
-
-	// Use something like this to talk to the shardctrler:
-	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.scc = shardctrler.MakeClerk(ctrlers)
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.clients = make(map[string]int64)
-	kv.distros = make(map[int]map[int]chan RaftResponse)
+	kv.distros = make(map[int]map[int]chan GeneralOutput)
+
 
 	go kv.executeLoop()
-	go kv.noopLoop()
 	go kv.configListenLoop()
 
 	return kv

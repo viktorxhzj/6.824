@@ -73,23 +73,7 @@ func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
 		return
 	}
 	src := resp.Output.(Config)
-	shards := [NShards]int{}
-	for i := 0; i < NShards; i++ {
-		shards[i] = src.Shards[i]
-	}
-	groups := make(map[int][]string)
-	num := src.Num
-
-	for k, v := range src.Groups {
-		arr := make([]string, len(v))
-		copy(arr, v)
-		groups[k] = arr
-	}
-	reply.Config = Config{
-		Num:    num,
-		Shards: shards,
-		Groups: groups,
-	}
+	CopyConfig(&reply.Config, &src)
 	reply.RPCInfo = resp.RPCInfo
 }
 

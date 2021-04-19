@@ -2,6 +2,7 @@ package kvraft
 
 import (
 	"bytes"
+	"fmt"
 	"time"
 
 	"6.824/labgob"
@@ -74,6 +75,7 @@ main:
 
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		kv.lock("execute loop")
+		kv.lastIdx = msg.CommandIndex
 
 		// deal with snapshot
 		if msg.SnapshotValid {
@@ -160,6 +162,7 @@ func (kv *KVServer) serializeState() []byte {
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.clients)
 	e.Encode(kv.state)
+	e.Encode(kv.lastIdx)
 	return w.Bytes()
 }
 
@@ -171,11 +174,15 @@ func (kv *KVServer) deserializeState(data []byte) {
 	d := labgob.NewDecoder(r)
 	var clients map[string]int64
 	var state map[string]string
+	var idx int
 	if d.Decode(&clients) != nil ||
-		d.Decode(&state) != nil {
+		d.Decode(&state) != nil || 
+		d.Decode(&idx) != nil {
 		panic("BAD KV PERSIST")
 	} else {
 		kv.clients = clients
 		kv.state = state
+		kv.lastIdx = idx
 	}
+	fmt.Printf("[KV %d] Loading Snapshot, applied-idx=%d\n", kv.me, idx)
 }

@@ -13,25 +13,24 @@ var (
 	EnableFile    = 0
 )
 
-// 可不在临界区打印
-func Debug(node int, format string, info ...interface{}) {
+func (kv *ShardKV) Log(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
 	str := fmt.Sprintf("%v [KV %d]",
-		time.Now().Format("15:04:05.000"), node)
+		time.Now().Format("15:04:05.000"), kv.me)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
 }
 
-// 必须由临界区保护
-func (kv *ShardKV) Log(format string, info ...interface{}) {
+// 可不在临界区
+func (kv *ShardKV) Debug(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v",
-		time.Now().Format("15:04:05.000"))
+	str := fmt.Sprintf("%v [KV %d]",
+		time.Now().Format("15:04:05.000"), kv.me)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)

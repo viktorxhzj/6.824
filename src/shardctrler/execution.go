@@ -9,15 +9,7 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse)
 
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	sc.lock("try apply")
-	var idx, term int
-	var ok bool
-	switch req.OpType {
-	case NIL:
-		idx, term, ok = sc.rf.Start(nil)
-	default:
-		idx, term, ok = sc.rf.Start(req)
-	}
-
+	idx, term, ok := sc.rf.Start(req)
 	if !ok {
 		sc.unlock()
 		resp.RPCInfo = WRONG_LEADER

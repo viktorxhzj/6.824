@@ -1,6 +1,9 @@
 package shardkv
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 //
 // Sharded key/value server.
@@ -15,21 +18,19 @@ const (
 	GET    = "Get"
 	PUT    = "Put"
 	APPEND = "Append"
-	NIL    = "Nil"
 
-	RUNNING  = 0
-	RECONFIG = 1
-
-	SUCCESS           = "成功"
-	NETWORK_FAILURE   = "超时"
+	SUCCEEDED_REQUEST = "成功请求"
+	FAILED_REQUEST    = "失败请求"
+	DUPLICATE_REQUEST = "重复请求"
+	NETWORK_ERROR     = "网络波动"
+	INTERNAL_TIMEOUT  = "内部超时"
 	WRONG_LEADER      = "错误领袖"
-	FAILED_REQUEST    = "失败重试"
-	DUPLICATE_REQUEST = "幂等拦截"
 	WRONG_GROUP       = "错误集群"
 
-	NO_OP_INTERVAL         = 1000
-	CONFIG_LISTEN_INTERVAL = 50
+	CONFIG_LISTEN_INTERVAL = 50 * time.Millisecond // 监听多集群配置变化的间隔时间
+	INTERNAL_MAX_DURATION = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
 )
+
 
 type ClerkId struct {
 	Uid string
@@ -45,6 +46,20 @@ type RaftRequest struct {
 
 type RaftResponse struct {
 	Value   string
+	RPCInfo string
+}
+
+type GeneralInput struct {
+	Key string
+	Value string
+	OpType string
+	ClerkId
+	Input interface{}
+}
+
+type GeneralOutput struct {
+	Value string
+	Output interface{}
 	RPCInfo string
 }
 

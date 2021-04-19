@@ -19,6 +19,7 @@ type KVServer struct {
 	lockTime time.Time
 
 	maxraftstate int // snapshot if log grows this big
+	lastIdx int
 
 	distros map[int]map[int]chan RaftResponse // distribution channels
 	clients map[string]int64                   // sequence number for each known client

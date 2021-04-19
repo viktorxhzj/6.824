@@ -22,6 +22,8 @@ type Clerk struct {
 	ClerkId
 }
 
+const CLIENT_REQUEST_INTERVAL = 100 * time.Millisecond // 客户端发起新一轮请求的间隔时间
+
 //
 // the tester calls MakeClerk.
 //
@@ -68,13 +70,13 @@ func (ck *Clerk) Get(key string) string {
 				var resp GetResponse
 				srv := ck.make_end(servers[si])
 				if ok := srv.Call("ShardKV.Get", &req, &resp); !ok {
-					resp.RPCInfo = NETWORK_FAILURE
+					resp.RPCInfo = NETWORK_ERROR
 				}
 				resp.Key = req.Key
 				resp.ClerkId = req.ClerkId
 				ck.Log(ck.Uid, "%+v", resp)
 				switch resp.RPCInfo {
-				case SUCCESS:
+				case SUCCEEDED_REQUEST:
 					return resp.Value
 				case WRONG_GROUP:
 					break round
@@ -83,7 +85,7 @@ func (ck *Clerk) Get(key string) string {
 				// ... not ok, or ErrWrongLeader
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(CLIENT_REQUEST_INTERVAL)
 		// ask controler for the latest configuration.
 		ck.config = ck.scc.Query(-1)
 	}
@@ -117,14 +119,14 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				var resp PutAppendResponse
 				srv := ck.make_end(servers[si])
 				if ok := srv.Call("ShardKV.PutAppend", &req, &resp); !ok {
-					resp.RPCInfo = NETWORK_FAILURE
+					resp.RPCInfo = NETWORK_ERROR
 				}
 				resp.Key = req.Key
 				resp.OpType = req.OpType
 				resp.ClerkId = req.ClerkId
 				ck.Log(ck.Uid, "%+v", resp)
 				switch resp.RPCInfo {
-				case SUCCESS:
+				case SUCCEEDED_REQUEST:
 					return
 				case DUPLICATE_REQUEST:
 					return
@@ -136,7 +138,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				// ... not ok, or ErrWrongLeader
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(CLIENT_REQUEST_INTERVAL)
 		// ask controler for the latest configuration.
 		ck.config = ck.scc.Query(-1)
 	}

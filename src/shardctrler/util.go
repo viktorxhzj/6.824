@@ -54,6 +54,25 @@ func GenerateClerkId() string {
 	return CTRLER_CLIENT_PREFIX + strconv.FormatInt(CtrlerClientGlobalId, 10)
 }
 
+func CopyConfig(des, src *Config) {
+	
+	// copy num
+	des.Num = src.Num
+	
+	// copy shards
+	for i := range des.Shards {
+		des.Shards[i] = src.Shards[i]
+	}
+	des.Groups = make(map[int][]string)
+
+	// copy groups
+	for k, v := range src.Groups {
+		arr := make([]string, len(v))
+		copy(arr, v)
+		des.Groups[k] = arr
+	}
+}
+
 func init() {
 	labgob.Register(JoinRequest{})
 	labgob.Register(JoinResponse{})
