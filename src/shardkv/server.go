@@ -9,29 +9,59 @@ import (
 )
 
 type ShardKV struct {
-	mu           sync.Mutex
-	me           int
-	rf           *raft.Raft
-	applyCh      chan raft.ApplyMsg
-	make_end     func(string) *labrpc.ClientEnd
-	gid          int
+	mu       sync.Mutex
+	me       int
+	rf       *raft.Raft
+	applyCh  chan raft.ApplyMsg
+	make_end func(string) *labrpc.ClientEnd
+	gid      int
 	// ctrlers      []*labrpc.ClientEnd
 	maxraftstate int // snapshot if log grows this big
 	dead         int32
 	scc          *shardctrler.Clerk
+	config       shardctrler.Config // latest config
 
-	distros map[int]map[int]chan RaftResponse // distribution channels
-	clients map[string]int64                  // sequence number for each known client
-	state   map[string]string                 // state machine
+	distros map[int]map[int]chan RaftResponse      // distribution channels
+	clients map[string]int64                       // sequence number for each known client
+	state   [shardctrler.NShards]map[string]string // state machine
+	status  int
 	// Your definitions here.
 }
 
 func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 	// Your code here.
+	req := RaftRequest{
+		Key:     args.Key,
+		ClerkId: args.ClerkId,
+		OpType:  GET,
+	}
+	resp := RaftResponse{}
+
+	kv.tryApplyAndGetResult(&req, &resp)
+
+	reply.Key = args.Key
+	reply.ClerkId = args.ClerkId
+	reply.Value = resp.Value
+	reply.RPCInfo = resp.RPCInfo
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 	// Your code here.
+	req := RaftRequest{
+		Key:     args.Key,
+		Value:   args.Value,
+		ClerkId: args.ClerkId,
+		OpType:  args.OpType,
+	}
+	resp := RaftResponse{}
+
+	kv.tryApplyAndGetResult(&req, &resp)
+
+	reply.Key = args.Key
+	reply.ClerkId = args.ClerkId
+	reply.OpType = args.OpType
+	reply.Value = resp.Value
+	reply.RPCInfo = resp.RPCInfo
 }
 
 //
@@ -81,12 +111,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	kv.state = make(map[string]string)
 	kv.clients = make(map[string]int64)
 	kv.distros = make(map[int]map[int]chan RaftResponse)
 
 	go kv.executeLoop()
 	go kv.noopLoop()
-	
+	go kv.configListenLoop()
+
 	return kv
 }

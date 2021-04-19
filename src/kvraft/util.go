@@ -4,6 +4,7 @@ import (
 	//"crypto/rand"
 	//"math/big"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -11,20 +12,19 @@ import (
 	"6.824/raft"
 )
 
-var (
-	NN int64
+const (
+	KV_CLIENT_PREFIX = "CLI "
 )
 
-//
-// the tester calls Kill() when a KVServer instance won't
-// be needed again. for your convenience, we supply
-// code to set rf.dead (without needing a lock),
-// and a killed() method to test rf.dead in
-// long-running loops. you can also add your own
-// code to Kill(). you're not required to do anything
-// about this, but it may be convenient (for example)
-// to suppress debug output from a Kill()ed instance.
-//
+var (
+	KVClientGlobalId int64
+)
+
+func GenerateClerkId() string {
+	KVClientGlobalId++
+	return KV_CLIENT_PREFIX + strconv.FormatInt(KVClientGlobalId, 10)
+}
+
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
@@ -34,14 +34,6 @@ func (kv *KVServer) Kill() {
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
-}
-
-func nrand() int64 {
-	// max := big.NewInt(int64(1) << 62)
-	// bigx, _ := rand.Int(rand.Reader, max)
-	// x := bigx.Int64()
-	// return x
-	return atomic.AddInt64(&NN, 1)
 }
 
 func registerRPCs() {

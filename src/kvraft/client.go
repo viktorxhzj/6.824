@@ -1,14 +1,18 @@
 package kvraft
 
 import (
-	"sync/atomic"
+	"time"
 
 	"6.824/labrpc"
 )
 
+const (
+	CLIENT_ROUND_INTERVAL = 100
+)
+
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	size    int
+	size int
 	ClerkId
 	recentLeader int
 	// You will have to modify this struct.
@@ -17,8 +21,8 @@ type Clerk struct {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.size = len(servers)
-	ck.Uid = nrand()
+	ck.Uid = GenerateClerkId()
+	ck.size = len(ck.servers)
 	// fmt.Println("NEW CLIENT", ck.Uid)
 	return ck
 }
@@ -37,40 +41,31 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 //
 func (ck *Clerk) Get(key string) string {
 
-	var req GetRequest
-	var resp GetResponse
+	ck.Seq++
 
-	req.Uid = ck.Uid
-	req.Key = key
-	req.Seq = atomic.AddInt64(&ck.Seq, 1)
+	req := GetRequest{
+		Key: key,
+		ClerkId: ClerkId{
+			Uid: ck.Uid,
+			Seq: ck.Seq,
+		},
+	}
 
 	i := ck.recentLeader
-
-	CDebug(ck.Uid, "开始GET%+v [NODE %d]", req, i)
 	for {
-		if ok := ck.servers[i].Call("KVServer.Get", &req, &resp); !ok {
-			resp.RPCInfo = NETWORK_FAILURE
+		// try each known server.
+		for range ck.servers {
+			CDebug(ck.Uid, "开始Get%+v [KV %d]", req, i)
+			var resp GetResponse
+			ck.servers[i].Call("KVServer.Get", &req, &resp)
+			if resp.RPCInfo == SUCCESS {
+				ck.recentLeader = i
+				CDebug(ck.Uid, "成功Get%+v", req)
+				return resp.Value
+			}
+			i = (i + 1) % ck.size
 		}
-
-		switch resp.RPCInfo {
-		case NETWORK_FAILURE:
-			i = (i + 1) % ck.size
-
-		case WRONG_LEADER:
-			i = (i + 1) % ck.size
-
-		case SUCCESS:
-			ck.recentLeader = i
-			CDebug(ck.Uid, "成功GET%+v", req)
-			return resp.Value
-
-		case FAILED_REQUEST:
-			i = (i + 1) % ck.size
-
-		}
-		resp.Value = ""
-		resp.RPCInfo = ""
-		CDebug(ck.Uid, "重试%+v [NODE %d]", req, i)
+		time.Sleep(CLIENT_ROUND_INTERVAL * time.Millisecond)
 	}
 }
 
@@ -86,46 +81,36 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
-	var req PutAppendRequest
-	var resp PutAppendResponse
+	ck.Seq++
 
-	req.Uid = ck.Uid
-	req.Key = key
-	req.Value = value
-	req.OpType = OpType(op)
-	req.Seq = atomic.AddInt64(&ck.Seq, 1)
+	req := PutAppendRequest{
+		Key: key,
+		Value: value,
+		OpType: op,
+		ClerkId: ClerkId{
+			Uid: ck.Uid,
+			Seq: ck.Seq,
+		},
+	}
 
 	i := ck.recentLeader
-
-	CDebug(ck.Uid, "开始PUTAPPEND%+v [NODE %d]", req, i)
 	for {
-		if ok := ck.servers[i].Call("KVServer.PutAppend", &req, &resp); !ok {
-			resp.RPCInfo = NETWORK_FAILURE
+		// try each known server.
+		for range ck.servers {
+			CDebug(ck.Uid, "开始PutAppend%+v [KV %d]", req, i)
+			var resp GetResponse
+			ck.servers[i].Call("KVServer.PutAppend", &req, &resp)
+			if resp.RPCInfo == SUCCESS {
+				ck.recentLeader = i
+				CDebug(ck.Uid, "成功PutAppend%+v", req)
+				return
+			} else if resp.RPCInfo == DUPLICATE_REQUEST {
+				CDebug(ck.Uid, "幂等拦截%+v", req)
+				return
+			}
+			i = (i + 1) % ck.size
 		}
-
-		switch resp.RPCInfo {
-		case NETWORK_FAILURE:
-			i = (i + 1) % ck.size
-
-		case WRONG_LEADER:
-			i = (i + 1) % ck.size
-
-		case SUCCESS:
-			ck.recentLeader = i
-			CDebug(ck.Uid, "成功PUTAPPEND%+v", req)
-			return
-
-		case FAILED_REQUEST:
-			i = (i + 1) % ck.size
-
-		case DUPLICATE_REQUEST:
-			CDebug(ck.Uid, "幂等性校验未通过%+v", req)
-			return
-
-		}
-
-		resp.RPCInfo = ""
-		CDebug(ck.Uid, "重试%+v [NODE %d]", req, i)
+		time.Sleep(CLIENT_ROUND_INTERVAL * time.Millisecond)
 	}
 }
 

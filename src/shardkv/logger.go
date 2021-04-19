@@ -9,7 +9,7 @@ import (
 
 var (
 	EnableDebug   = 1
-	EnableConsole = 1
+	EnableConsole = 0
 	EnableFile    = 0
 )
 

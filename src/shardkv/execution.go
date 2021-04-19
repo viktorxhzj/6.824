@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"6.824/labgob"
+	"6.824/shardctrler"
 )
 
 func (kv *ShardKV) executeLoop() {
@@ -21,7 +22,7 @@ main:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		kv.mu.Lock()
 
-		// deal with snapshot
+		// 快照处理
 		if msg.SnapshotValid {
 			Debug(kv.me, "收到快照{...=>[%d|%d]", msg.SnapshotIndex, msg.SnapshotTerm)
 
@@ -41,11 +42,12 @@ main:
 			kv.mu.Unlock()
 			continue main
 		}
-		// deal with commands
+
 		idx, term := msg.CommandIndex, msg.CommandTerm
 		r, ok := msg.Command.(RaftRequest)
 		Debug(kv.me, "收到日志[%d|%d] {%+v}", idx, term, msg.Command)
-		// No-op
+
+		// 空日志处理
 		if !ok {
 			mm := kv.distros[idx]
 			for _, v := range mm {
@@ -55,9 +57,25 @@ main:
 			kv.mu.Unlock()
 			continue main
 		}
-		seq := kv.clients[r.Uid]
+
+		// 分片校验
+		s := key2shard(r.Key)
+		if kv.gid != kv.config.Shards[s] {
+			mm := kv.distros[idx]
+			for k, v := range mm {
+				if k == term {
+					v <- RaftResponse{RPCInfo: WRONG_GROUP}
+				} else {
+					v <- RaftResponse{RPCInfo: FAILED_REQUEST}
+				}
+			}
+			delete(kv.distros, idx)
+			kv.mu.Unlock()
+			continue main
+		}
 
 		// 幂等性校验
+		seq := kv.clients[r.Uid]
 		if r.OpType != GET && r.Seq <= seq {
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -76,7 +94,10 @@ main:
 
 		switch r.OpType {
 		case GET:
-			val := kv.state[r.Key]
+			var val string
+			if kv.state[s] != nil {
+				val = kv.state[s][r.Key]
+			}
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -88,8 +109,11 @@ main:
 			}
 
 		case PUT:
-			kv.state[r.Key] = r.Value
-			val := kv.state[r.Key]
+			if kv.state[s] == nil {
+				kv.state[s] = make(map[string]string)
+			}
+			kv.state[s][r.Key] = r.Value
+			val := kv.state[s][r.Key]
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -101,8 +125,8 @@ main:
 			}
 
 		case APPEND:
-			kv.state[r.Key] = kv.state[r.Key] + r.Value
-			val := kv.state[r.Key]
+			kv.state[s][r.Key] = kv.state[s][r.Key] + r.Value
+			val := kv.state[s][r.Key]
 			Debug(kv.me, "RELATED STATE=[K:%s V:%s]", r.Key, val)
 			mm := kv.distros[idx]
 			for k, v := range mm {
@@ -145,6 +169,15 @@ func (kv *ShardKV) noopLoop() {
 		resp := RaftResponse{}
 		Debug(kv.me, "Periodically No-Op")
 		go kv.tryApplyAndGetResult(&req, &resp)
+	}
+}
+
+func (kv *ShardKV) configListenLoop() {
+	for !kv.killed() {
+		time.Sleep(CONFIG_LISTEN_INTERVAL * time.Millisecond)
+		kv.mu.Lock()
+		kv.config = kv.scc.Query(-1)
+		kv.mu.Unlock()
 	}
 }
 
@@ -201,7 +234,7 @@ func (kv *ShardKV) deserializeState(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var clients map[string]int64
-	var state map[string]string
+	var state [shardctrler.NShards]map[string]string
 	if d.Decode(&clients) != nil ||
 		d.Decode(&state) != nil {
 		panic("BAD KV PERSIST")

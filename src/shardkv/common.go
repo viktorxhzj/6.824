@@ -15,7 +15,10 @@ const (
 	GET    = "Get"
 	PUT    = "Put"
 	APPEND = "Append"
-	NIL = "Nil"
+	NIL    = "Nil"
+
+	RUNNING  = 0
+	RECONFIG = 1
 
 	SUCCESS           = "成功"
 	NETWORK_FAILURE   = "超时"
@@ -24,7 +27,8 @@ const (
 	DUPLICATE_REQUEST = "幂等拦截"
 	WRONG_GROUP       = "错误集群"
 
-	NO_OP_INTERVAL = 1000
+	NO_OP_INTERVAL         = 1000
+	CONFIG_LISTEN_INTERVAL = 50
 )
 
 type ClerkId struct {
@@ -55,7 +59,8 @@ type PutAppendRequest struct {
 type PutAppendResponse struct {
 	Key     string // redundant info
 	OpType  string // redundant info
-	ClerkId        // redundant info
+	Value   string
+	ClerkId // redundant info
 	RPCInfo string
 }
 
@@ -67,8 +72,8 @@ type GetRequest struct {
 type GetResponse struct {
 	Key     string // redundant info
 	Value   string
-	ClerkId // redundant info
 	RPCInfo string
+	ClerkId // redundant info
 }
 
 func (c ClerkId) String() string {

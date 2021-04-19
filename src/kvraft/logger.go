@@ -17,18 +17,18 @@ func Debug(node int, format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [NODE %d]",
+	str := fmt.Sprintf("%v [KV %d]",
 		time.Now().Format("15:04:05.000"), node)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
 }
 
-func CDebug(client int64, format string, info ...interface{}) {
+func CDebug(client string, format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [CLIENT %d]",
+	str := fmt.Sprintf("%v [%s]",
 		time.Now().Format("15:04:05.000"), client)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"

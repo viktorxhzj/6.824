@@ -1,6 +1,9 @@
 package shardctrler
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 //
 // Shard controler: assigns shards to replication groups.
@@ -20,7 +23,7 @@ import "fmt"
 //
 
 // The number of shards.
-const NShards = 1 << 4
+const NShards = 10
 
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
@@ -31,11 +34,14 @@ type Config struct {
 }
 
 func (c Config) String() string {
-	m := make(map[int]int)
-	for _, g := range c.Shards {
-		m[g] = m[g] + 1
+	var str string
+	for i, g := range c.Shards {
+		str += strconv.Itoa(g)
+		if i != NShards - 1 {
+			str += "|"
+		}
 	}
-	return fmt.Sprintf("CONF %d, %v", c.Num, m)
+	return fmt.Sprintf("CONF %d [%s]", c.Num, str)
 }
 
 const (

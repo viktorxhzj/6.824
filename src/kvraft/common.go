@@ -2,44 +2,51 @@ package kvraft
 
 import "fmt"
 
-type (
-	RPCInfo string
-	OpType  string
-)
-
 const (
-	GET    OpType = "Get"
-	PUT    OpType = "Put"
-	APPEND OpType = "Append"
-	NIL    OpType = "NIL"
+	GET    = "Get"
+	PUT    = "Put"
+	APPEND = "Append"
+	NIL    = "Nil"
 
-	SUCCESS           RPCInfo = "成功"
-	NETWORK_FAILURE   RPCInfo = "超时"
-	WRONG_LEADER      RPCInfo = "非法领袖"
-	FAILED_REQUEST    RPCInfo = "失败重试"
-	DUPLICATE_REQUEST RPCInfo = "幂等拦截"
+	SUCCESS           = "成功"
+	NETWORK_FAILURE   = "超时"
+	WRONG_LEADER      = "非法领袖"
+	FAILED_REQUEST    = "失败重试"
+	DUPLICATE_REQUEST = "幂等拦截"
 
-	NO_OP_INTERVAL          = 1000
+	NO_OP_INTERVAL = 1000
 )
 
 type ClerkId struct {
-	Uid int64
+	Uid string
 	Seq int64
 }
 
-func (c ClerkId) String() string {
-	return fmt.Sprintf("[CLI-%d SEQ-%d]", c.Uid, c.Seq)
+type RaftRequest struct {
+	Key    string
+	Value  string
+	OpType string
+	ClerkId
+}
+
+type RaftResponse struct {
+	Value   string
+	RPCInfo string
 }
 
 type PutAppendRequest struct {
-	Key   string
-	Value string
-	OpType
+	Key    string
+	Value  string
+	OpType string
 	ClerkId
 }
 
 type PutAppendResponse struct {
-	RPCInfo
+	Key     string // redundant info
+	OpType  string // redundant info
+	Value   string // value immediately after execution
+	ClerkId        // redundant info
+	RPCInfo string
 }
 
 type GetRequest struct {
@@ -48,29 +55,28 @@ type GetRequest struct {
 }
 
 type GetResponse struct {
-	RPCInfo
-	Value string
+	Key     string // redundant info
+	Value   string
+	RPCInfo string
+	ClerkId // redundant info
 }
 
-type RaftRequest struct {
-	Key   string
-	Value string
-	OpType
-	ClerkId
+func (c ClerkId) String() string {
+	return fmt.Sprintf("[%s|SEQ-%d]", c.Uid, c.Seq)
 }
 
-func (r RaftRequest) String() string {
-	return fmt.Sprintf("%+v [%+v K:%s V:%s]", r.ClerkId, r.OpType, r.Key, r.Value)
+func (r PutAppendRequest) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[%s K-%s V-%s]", r.OpType, r.Key, r.Value)
 }
 
-type RaftResponse struct {
-	Key   string
-	Value string
-	OpType
-	RPCInfo
-	ClerkId
+func (r PutAppendResponse) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[%s K-%s %s]", r.OpType, r.Key, r.RPCInfo)
 }
 
-func (r RaftResponse) String() string {
-	return fmt.Sprintf("%+v [%+v K:%s V:%s] %+v", r.ClerkId, r.OpType, r.Key, r.Value, r.RPCInfo)
+func (r GetRequest) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[Get K-%s]", r.Key)
+}
+
+func (r GetResponse) String() string {
+	return r.ClerkId.String() + fmt.Sprintf("[Get K-%s %s]", r.Key, r.RPCInfo)
 }
