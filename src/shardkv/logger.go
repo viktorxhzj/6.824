@@ -5,21 +5,29 @@ import (
 	"time"
 
 	"6.824/raft"
+	"6.824/shardctrler"
 )
 
 var (
 	EnableDebug   = 1
 	EnableConsole = 0
-	EnableFile    = 0
+	EnableFile    = 1
 )
 
 func (kv *ShardKV) Log(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [KV %d]",
-		time.Now().Format("15:04:05.000"), kv.me)
-	str += fmt.Sprintf("Prev-Conf:%d,Conf:%d,Step:%d,ToPull:%+v", kv.conf.Num, kv.prevConf.Num, kv.step, kv.ShardIdsToPull)
+	str := fmt.Sprintf("%v [KV %d-%d]",
+		time.Now().Format("15:04:05.000"), kv.gid, kv.me)
+	str += fmt.Sprintf("old-Conf:%d,Conf:%d,Step:%d,", kv.oldConf.Num, kv.conf.Num, kv.step)
+	var his []ShardInfo
+	for i := 0; i < shardctrler.NShards; i++ {
+		for k := range kv.historyState[i] {
+			his = append(his, ShardInfo{Shard: i, ConfigNum: k})
+		}
+	}
+	str += fmt.Sprintf("His%+v  ", his)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
@@ -30,8 +38,8 @@ func (kv *ShardKV) Debug(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [KV %d]",
-		time.Now().Format("15:04:05.000"), kv.me)
+	str := fmt.Sprintf("%v [KV %d-%d]",
+		time.Now().Format("15:04:05.000"), kv.gid, kv.me)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
@@ -49,7 +57,7 @@ func (ck *Clerk) Log(format string, info ...interface{}) {
 }
 
 func write(str string) {
-	if EnableFile == 1 && raft.EnableFile == 1 {
+	if EnableFile == 1 {
 		_, err := raft.File.WriteString(str)
 		if err != nil {
 			panic("Failed to write")

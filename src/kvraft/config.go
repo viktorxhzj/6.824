@@ -364,7 +364,7 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 		}
 		rand.Seed(makeSeed())
 	})
-	runtime.GOMAXPROCS(4)
+	//runtime.GOMAXPROCS(4)
 	cfg := &config{}
 	cfg.t = t
 	cfg.net = labrpc.MakeNetwork()

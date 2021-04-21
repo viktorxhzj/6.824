@@ -12,11 +12,11 @@ var (
 	Suffix        = ".logger"
 	EnableDebug   = 1
 	EnableConsole = 0
-	EnableFile    = 1
+	EnableFile    = 0
 )
 
 func init() {
-	if EnableFile == 1 {
+	if EnableDebug == 1 {
 		filePath := Prefix + time.Now().Format("15:04:05.000") + Suffix
 		File, _ = os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	}

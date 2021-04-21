@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	EnableDebug   = 0
-	EnableConsole = 1
-	EnableFile    = 0
+	EnableDebug   = 1
+	EnableConsole = 0
+	EnableFile    = 1
 )
 
 func (ck *Clerk) Log(format string, info ...interface{}) {

@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"bytes"
-	"fmt"
 	"time"
 
 	"6.824/labgob"
@@ -184,5 +183,5 @@ func (kv *KVServer) deserializeState(data []byte) {
 		kv.state = state
 		kv.lastIdx = idx
 	}
-	fmt.Printf("[KV %d] Loading Snapshot, applied-idx=%d\n", kv.me, idx)
+	//fmt.Printf("[KV %d] Loading Snapshot, applied-idx=%d\n", kv.me, idx)
 }

@@ -22,41 +22,40 @@ type ShardKV struct {
 	make_end func(string) *labrpc.ClientEnd
 	// ctrlers      []*labrpc.ClientEnd
 
-
 	// 持久化信息
-	clients      [shardctrler.NShards]map[string]int64                       // sequence number for each known client
-	stateMachine [shardctrler.NShards]map[string]string // state machine
-	historyState map[int]map[int]map[string]string // configNum -> shard -> data
-	historyClients map[int]map[int]map[string]int64
+	clients        [shardctrler.NShards]map[string]int64  // sequence number for each known client
+	stateMachine   [shardctrler.NShards]map[string]string // state machine
+	historyState   [shardctrler.NShards]map[int]map[string]string
+	historyClients [shardctrler.NShards]map[int]map[string]int64
 
 	conf     shardctrler.Config // latest config
-	prevConf shardctrler.Config // previous config
-	step int // 负数代表正在reconfiguration, 绝对值等于还缺少的分片数量
+	oldConf shardctrler.Config // previous config
+	step     int                // 负数代表正在reconfiguration, 绝对值等于还缺少的分片数量
 
 	// 当采用新的配置时，记录需要拉取的分片，已经拉取的分片和需要丢弃的分片
 	// 轮询拉取需要拉取的分片i，拉取成功并成功应用时，该分片被置为已拉取
 	// 轮询通知需要丢弃已拉取的分片，接受成功并成功应用时，丢弃该分片并置为已丢弃
-	ShardIdsToPull [shardctrler.NShards]bool
+	ShardIdsToPull    [shardctrler.NShards]bool
 	ShardIdsToDiscard [shardctrler.NShards]bool
-
 
 	rf           *raft.Raft
 	applyCh      chan raft.ApplyMsg
 	maxraftstate int // snapshot if log grows this big
 	dead         int32
 
-	distros      map[int]map[int]chan GeneralOutput      // distribution channels
+	distros map[int]map[int]chan GeneralOutput // distribution channels
 
 }
 
 func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
-	defer func() {
-		kv.Debug("Get RPC returns, %+v", *reply)
-	}()
+	// defer func() {
+	// 	kv.Debug("Get RPC returns, %+v", *reply)
+	// }()
 
 	req := GeneralInput{
 		OpType: GET,
-		Input: *args,
+		Key: args.Key,
+		ClerkId: args.ClerkId,
 	}
 
 	resp := kv.tryApplyAndGetResult(req)
@@ -69,13 +68,15 @@ func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
-	defer func() {
-		kv.Debug("PutAppend RPC returns, %+v", *reply)
-	}()
+	// defer func() {
+	// 	kv.Debug("PutAppend RPC returns, %+v", *reply)
+	// }()
 
 	req := GeneralInput{
 		OpType: args.OpType,
-		Input: *args,
+		Key: args.Key,
+		Value: args.Value,
+		ClerkId: args.ClerkId,
 	}
 
 	resp := kv.tryApplyAndGetResult(req)
@@ -88,11 +89,62 @@ func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 	reply.Value = resp.Value
 }
 
-func (kv *ShardKV) PullShard(args *PutAppendRequest, reply *PutAppendResponse) {}
+// RPCINFO:
+// FAILED_REQUEST
+// SUCCEEDED_REQUEST
+func (kv *ShardKV) PullShard(args *PullShardRequest, reply *PullShardResponse) {
+	kv.lock("pullshard RPC")
+	c, s := args.ConfigNum, args.Shard
+	if _, ok := kv.historyClients[s][c]; !ok {
+			reply.RPCInfo = FAILED_REQUEST
+			kv.Log("PullShard返回 %d|%d, %s", args.Shard, args.ConfigNum, reply.RPCInfo)
+			kv.unlock()
+			return
+	}
+	reply.Clients = make(map[string]int64)
+	reply.StateMachine = make(map[string]string)
+	for k, v := range kv.historyClients[s][c] {
+		reply.Clients[k] = v
+	}
+	for k, v := range kv.historyState[s][c] {
+		reply.StateMachine[k] = v
+	}
+	kv.unlock()
+	reply.RPCInfo = SUCCEEDED_REQUEST
+}
 
-func (kv *ShardKV) RemoveShard(args *PutAppendRequest, reply *PutAppendResponse) {}
+// RPCINFO:
+// FAILED_REQUEST
+// WRONG_LEADER
+// INTERNAL_TIMEOUT
+// ALREADY_CLEAN *视为成功
+// SUCCEEDED_REQUEST
+func (kv *ShardKV) CleanShard(args *CleanShardRequest, reply *CleanShardResponse) {
+	defer func() {
+		kv.Debug("CleanShard RPC returns, %s", reply.RPCInfo)
+	}()
+	kv.lock("pullshard RPC")
+	// 还没更新
+	if args.ConfigNum > kv.oldConf.Num {
+		kv.unlock()
+		reply.RPCInfo = FAILED_REQUEST
+		return
+	}
+	// 已经更新，而且已经删了
+	if args.ConfigNum == kv.oldConf.Num && !kv.ShardIdsToDiscard[args.Shard] {
+		kv.unlock()
+		reply.RPCInfo = ALREADY_CLEAN
+		return
+	}
+	kv.unlock()
 
-
+	req := GeneralInput{
+		OpType: PASSIVE_CLEAN_SHARD,
+		Input:  args.ShardInfo,
+	}
+	resp := kv.tryApplyAndGetResult(req)
+	reply.RPCInfo = resp.RPCInfo
+}
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -134,19 +186,24 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 	kv.distros = make(map[int]map[int]chan GeneralOutput)
+	kv.Debug("****[KV STARTED]****")
 
 	for i := 0; i < shardctrler.NShards; i++ {
 		kv.clients[i] = make(map[string]int64)
 		kv.stateMachine[i] = make(map[string]string)
+		kv.historyClients[i] = make(map[int]map[string]int64)
+		kv.historyState[i] = make(map[int]map[string]string)
 	}
 
-	kv.historyClients = make(map[int]map[int]map[string]int64)
-	kv.historyState = make(map[int]map[int]map[string]string)
+	data := kv.rf.LastestSnapshot().Data
+	kv.deserializeState(data)
 
 
 	go kv.executeLoop()
 	go kv.configListenLoop()
 	go kv.pullShardLoop()
+	go kv.infoCleanShardLoop()
+	go kv.cleanShardLoop()
 
 	return kv
 }

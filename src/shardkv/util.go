@@ -27,10 +27,9 @@ func (kv *ShardKV) lock(namespace string) {
 }
 
 func (kv *ShardKV) unlock() {
-	if d := time.Since(kv.locktime); d >= 2 * time.Millisecond {
-		panic(fmt.Sprintf("UNLOCK[%s] too long", kv.lockname))
+	if d := time.Since(kv.locktime); d >= LOCK_TIMEOUT {
+		panic(fmt.Sprintf("[KV %d] UNLOCK[%s] too long, cost %+v", kv.me, kv.lockname, d))
 	}
-	kv.Log("UNLOCK[%s]", kv.lockname)
 	kv.mu.Unlock()
 }
 
@@ -51,7 +50,7 @@ func GenerateClerkId() string {
 func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	fmt.Printf("****[KV %d CRASHED]****\n", kv.me)
+	kv.Debug("****[KV CRASHED]****")
 	// Your code here, if desired.
 }
 
@@ -76,6 +75,9 @@ func init() {
 	labgob.Register(raft.InstallSnapshotRequest{})
 	labgob.Register(raft.InstallSnapshotResponse{})
 
+	labgob.Register(PullShardData{})
+	labgob.Register(ShardInfo{})
+
 	labgob.Register(GeneralInput{})
 	labgob.Register(GeneralOutput{})
 	labgob.Register(shardctrler.JoinRequest{})
@@ -90,8 +92,29 @@ func init() {
 	labgob.Register(shardctrler.QueryRequest{})
 	labgob.Register(shardctrler.QueryResponse{})
 
+	labgob.Register(shardctrler.Config{})
 	labgob.Register(map[int][]string{})
 	labgob.Register([]int{})
 
 	labgob.Register(shardctrler.Movable{})
+}
+
+func TimerForTest(c chan int) {
+	var t int
+	var s string
+outer:
+	for {
+		select {
+		case <-c:
+			break outer
+		default:
+			t++
+			s += "*"
+			time.Sleep(time.Second)
+		}
+		fmt.Printf("%02d second %s\n", t, s)
+		if t >= 100 {
+			panic("panic_too_long")
+		}
+	}
 }

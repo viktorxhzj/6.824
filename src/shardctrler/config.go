@@ -331,7 +331,7 @@ func (cfg *config) make_partition() ([]int, []int) {
 }
 
 func make_config(t *testing.T, n int, unreliable bool) *config {
-	runtime.GOMAXPROCS(4)
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	cfg := &config{}
 	cfg.t = t
 	cfg.net = labrpc.MakeNetwork()

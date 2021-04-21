@@ -15,12 +15,13 @@ import (
 //
 
 const (
-	GET           = "Get"
-	PUT           = "Put"
-	APPEND        = "Append"
-	PULL_SHARD    = "Pull Shard"
-	REMOVE_SHARD  = "Remove Shard"
-	CHANGE_CONFIG = "Change Config"
+	GET                 = "Get"
+	PUT                 = "Put"
+	APPEND              = "Append"
+	PULL_SHARD          = "拉取分片"
+	ACTIVE_CLEAN_SHARD  = "主动清理"
+	PASSIVE_CLEAN_SHARD = "被动清理"
+	UPDATE_CONFIG       = "更改配置"
 
 	SUCCEEDED_REQUEST = "成功请求"
 	FAILED_REQUEST    = "失败请求"
@@ -29,10 +30,14 @@ const (
 	INTERNAL_TIMEOUT  = "内部超时"
 	WRONG_LEADER      = "错误领袖"
 	WRONG_GROUP       = "错误集群"
+	ALREADY_CLEAN     = "已经删除"
 
 	CONFIG_LISTEN_INTERVAL = 50 * time.Millisecond // 监听多集群配置变化的间隔时间
 	SHARD_PULL_INTERVAL    = 100 * time.Millisecond
+	INFO_CLEAN_INTERVAL    = 1000 * time.Millisecond
+	CLEAN_SHARD_INTERVAL   = 1000 * time.Millisecond
 	INTERNAL_MAX_DURATION  = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
+	LOCK_TIMEOUT = 2000 * time.Millisecond
 )
 
 type ClerkId struct {
@@ -102,12 +107,12 @@ type PullShardData struct {
 	Clients      map[string]int64
 }
 
-type RemoveShardRequest struct{
+type CleanShardRequest struct {
 	ShardInfo
 }
 
-type RemoveShardResponse struct{
-	RPCInfo      string
+type CleanShardResponse struct {
+	RPCInfo string
 }
 
 func (c ClerkId) String() string {
@@ -128,4 +133,8 @@ func (r GetRequest) String() string {
 
 func (r GetResponse) String() string {
 	return r.ClerkId.String() + fmt.Sprintf("[Get K-%s %s]", r.Key, r.RPCInfo)
+}
+
+func (s ShardInfo) String() string {
+	return fmt.Sprintf("[%d|%d]", s.Shard, s.ConfigNum)
 }

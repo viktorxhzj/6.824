@@ -34,7 +34,7 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
-const CLIENT_REQUEST_INTERVAL = 100 * time.Millisecond
+const CLIENT_REQUEST_INTERVAL = 1400 * time.Millisecond
 const APPLY_TIMEOUT = 500 * time.Millisecond
 
 const (

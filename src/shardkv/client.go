@@ -9,9 +9,11 @@ package shardkv
 //
 
 import (
+	"sync/atomic"
+	"time"
+
 	"6.824/labrpc"
 	"6.824/shardctrler"
-	"time"
 )
 
 type Clerk struct {
@@ -50,21 +52,20 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 //
 func (ck *Clerk) Get(key string) string {
 
-	ck.Seq++
 	req := GetRequest{
 		Key: key,
 		ClerkId: ClerkId{
 			Uid: ck.Uid,
-			Seq: ck.Seq,
+			Seq: atomic.AddInt64(&ck.Seq, 1),
 		},
 	}
 	shard := key2shard(key)
-	ck.Log(ck.Uid, "开始%+v,分片%d", req, shard)
+	// ck.Log("开始%+v,分片%d", req, shard)
 	for {
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
 			// try each server for the shard.
-			ck.Log(ck.Uid, "%+v轮询GID%d", req, gid)
+			// ck.Log("%+v轮询GID%d", req, gid)
 		round:
 			for si := 0; si < len(servers); si++ {
 				var resp GetResponse
@@ -74,7 +75,7 @@ func (ck *Clerk) Get(key string) string {
 				}
 				resp.Key = req.Key
 				resp.ClerkId = req.ClerkId
-				ck.Log(ck.Uid, "%+v", resp)
+				// ck.Log("%+v", resp)
 				switch resp.RPCInfo {
 				case SUCCEEDED_REQUEST:
 					return resp.Value
@@ -97,23 +98,22 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
-	ck.Seq++
 	req := PutAppendRequest{
 		Key:   key,
 		Value: value,
 		ClerkId: ClerkId{
 			Uid: ck.Uid,
-			Seq: ck.Seq,
+			Seq: atomic.AddInt64(&ck.Seq, 1),
 		},
 		OpType: op,
 	}
 	shard := key2shard(key)
-	ck.Log(ck.Uid, "开始%+v,分片%d", req, shard)
+	// ck.Log("开始%+v,分片%d", req, shard)
 
 	for {
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
-			ck.Log(ck.Uid, "%+v轮询GID%d", req, gid)
+			// ck.Log("%+v轮询GID%d", req, gid)
 		round:
 			for si := 0; si < len(servers); si++ {
 				var resp PutAppendResponse
@@ -124,7 +124,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				resp.Key = req.Key
 				resp.OpType = req.OpType
 				resp.ClerkId = req.ClerkId
-				ck.Log(ck.Uid, "%+v", resp)
+				// ck.Log("%+v", resp)
 				switch resp.RPCInfo {
 				case SUCCEEDED_REQUEST:
 					return

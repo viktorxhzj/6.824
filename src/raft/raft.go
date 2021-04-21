@@ -141,7 +141,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Debug(rf, "更新match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 		// non-blocking 
-		rf.appendChan <- 0
+		go func() {rf.appendChan <- 0}()
 	default:
 		// not a leader
 	}

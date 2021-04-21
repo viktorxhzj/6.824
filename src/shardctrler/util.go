@@ -12,7 +12,7 @@ import (
 
 const (
 	CTRLER_CLIENT_PREFIX = "CTRLER-CLI "
-	LOCK_TIMEOUT     = 1000 * time.Millisecond
+	LOCK_TIMEOUT     = 5000 * time.Millisecond
 )
 
 var (
@@ -35,6 +35,7 @@ func (sc *ShardCtrler) unlock() {
 func (sc *ShardCtrler) Kill() {
 	atomic.StoreInt32(&sc.dead, 1)
 	sc.rf.Kill()
+	// fmt.Printf("kill CTRLER %d\n", sc.me)
 	// Your code here, if desired.
 }
 

@@ -8,14 +8,12 @@ import (
 func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
 
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-	sc.lock("try apply")
 	idx, term, ok := sc.rf.Start(req)
 	if !ok {
-		sc.unlock()
 		resp.RPCInfo = WRONG_LEADER
 		return
 	}
-
+	sc.lock("try apply")
 	ch := make(chan RaftResponse)
 	if mm := sc.distros[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
