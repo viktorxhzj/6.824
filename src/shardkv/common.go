@@ -15,9 +15,12 @@ import (
 //
 
 const (
-	GET    = "Get"
-	PUT    = "Put"
-	APPEND = "Append"
+	GET           = "Get"
+	PUT           = "Put"
+	APPEND        = "Append"
+	PULL_SHARD    = "Pull Shard"
+	REMOVE_SHARD  = "Remove Shard"
+	CHANGE_CONFIG = "Change Config"
 
 	SUCCEEDED_REQUEST = "成功请求"
 	FAILED_REQUEST    = "失败请求"
@@ -28,42 +31,29 @@ const (
 	WRONG_GROUP       = "错误集群"
 
 	CONFIG_LISTEN_INTERVAL = 50 * time.Millisecond // 监听多集群配置变化的间隔时间
-	INTERNAL_MAX_DURATION = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
+	SHARD_PULL_INTERVAL    = 100 * time.Millisecond
+	INTERNAL_MAX_DURATION  = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
 )
-
 
 type ClerkId struct {
 	Uid string
 	Seq int64
 }
 
-type RaftRequest struct {
+type GeneralInput struct {
 	Key    string
 	Value  string
-	OpType string
-	ClerkId
-}
-
-type RaftResponse struct {
-	Value   string
-	RPCInfo string
-}
-
-type GeneralInput struct {
-	Key string
-	Value string
 	OpType string
 	ClerkId
 	Input interface{}
 }
 
 type GeneralOutput struct {
-	Value string
-	Output interface{}
+	Value   string
+	Output  interface{}
 	RPCInfo string
 }
 
-// Put or Append
 type PutAppendRequest struct {
 	Key    string
 	Value  string
@@ -89,6 +79,35 @@ type GetResponse struct {
 	Value   string
 	RPCInfo string
 	ClerkId // redundant info
+}
+
+type ShardInfo struct {
+	ConfigNum int
+	Shard     int
+}
+
+type PullShardRequest struct {
+	ShardInfo
+}
+
+type PullShardResponse struct {
+	StateMachine map[string]string
+	Clients      map[string]int64
+	RPCInfo      string
+}
+
+type PullShardData struct {
+	ShardInfo
+	StateMachine map[string]string
+	Clients      map[string]int64
+}
+
+type RemoveShardRequest struct{
+	ShardInfo
+}
+
+type RemoveShardResponse struct{
+	RPCInfo      string
 }
 
 func (c ClerkId) String() string {

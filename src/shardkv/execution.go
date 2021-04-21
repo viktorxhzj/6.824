@@ -23,8 +23,6 @@ main:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		kv.lock("execute loop")
 
-		kv.lastAppliedIdx = msg.CommandIndex
-
 		if kv.tryLoadSnapshot(&msg) {
 			kv.unlock()
 			continue main
@@ -39,20 +37,26 @@ main:
 			if succeed := kv.tryExecuteCommand(idx, term, &r); succeed {
 				kv.trySaveSnapshot(idx)
 			}
+		case CHANGE_CONFIG:
+			if succeed := kv.tryLoadConfiguration(&r); succeed {
+				kv.mustSaveSnapshot(idx)
+			}
+		case PULL_SHARD:
+			if succeed := kv.tryLoadShard(&r); succeed {
+				kv.mustSaveSnapshot(idx)
+			}
+
+		case REMOVE_SHARD:
+			if succeed := kv.tryCleanShard(&r); succeed {
+				kv.mustSaveSnapshot(idx)
+			}
+
 		default:
+			panic("invalid operation type")
 		}
 
 		kv.unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
-	}
-}
-
-func (kv *ShardKV) configListenLoop() {
-	for !kv.killed() {
-		time.Sleep(CONFIG_LISTEN_INTERVAL)
-		kv.mu.Lock()
-		kv.conf = kv.scc.Query(-1)
-		kv.mu.Unlock()
 	}
 }
 
@@ -70,19 +74,24 @@ func (kv *ShardKV) tryLoadSnapshot(msg *raft.ApplyMsg) (succeed bool) {
 	return
 }
 
-func (kv *ShardKV) trySaveSnapshot(idx int) (succeed bool) {
+func (kv *ShardKV) trySaveSnapshot(lastIncludedIdx int) (succeed bool) {
 	if kv.maxraftstate != -1 && kv.rf.ShouldSnapshot(kv.maxraftstate) {
 		succeed = true
-		stateBytes := kv.serializeState()
-		kv.cleanDistros(idx)
-		kv.rf.Snapshot(idx, stateBytes)
+		kv.mustSaveSnapshot(lastIncludedIdx)
 	}
 	return
+}
+
+func (kv *ShardKV) mustSaveSnapshot(lastIncludedIdx int) {
+	stateBytes := kv.serializeState()
+	kv.cleanDistros(lastIncludedIdx)
+	kv.rf.Snapshot(lastIncludedIdx, stateBytes)
 }
 
 func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bool) {
 	// 分片校验
 	s := key2shard(r.Key)
+	// 分片不对
 	if kv.gid != kv.conf.Shards[s] {
 		if ch, ok := kv.distros[idx][term]; ok {
 			ch <- GeneralOutput{RPCInfo: WRONG_GROUP}
@@ -90,9 +99,17 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 		}
 		return
 	}
+	// 分片正确，但是在等待数据
+	if kv.step < 0 && kv.ShardIdsToPull[s] {
+		if ch, ok := kv.distros[idx][term]; ok {
+			ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}
+			delete(kv.distros[idx], term)
+		}
+		return
+	}
 
 	// 幂等性校验
-	seq := kv.clients[r.Uid]
+	seq := kv.clients[s][r.Uid]
 	if r.OpType != GET && r.Seq <= seq {
 		if ch, ok := kv.distros[idx][term]; ok {
 			ch <- GeneralOutput{RPCInfo: DUPLICATE_REQUEST}
@@ -102,7 +119,7 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 	}
 
 	succeed = true
-	kv.clients[r.Uid] = r.Seq
+	kv.clients[s][r.Uid] = r.Seq
 	var val string
 	switch r.OpType {
 	case GET:
@@ -175,8 +192,14 @@ func (kv *ShardKV) serializeState() []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.clients)
+	e.Encode(kv.historyClients)
 	e.Encode(kv.stateMachine)
-	e.Encode(kv.lastAppliedIdx)
+	e.Encode(kv.historyState)
+	e.Encode(kv.conf)
+	e.Encode(kv.prevConf)
+	e.Encode(kv.step)
+	e.Encode(kv.ShardIdsToPull)
+	e.Encode(kv.ShardIdsToDiscard)
 	return w.Bytes()
 }
 
@@ -186,17 +209,35 @@ func (kv *ShardKV) deserializeState(data []byte) {
 	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
-	var clients map[string]int64
-	var state [shardctrler.NShards]map[string]string
-	var idx int
+	var clients [shardctrler.NShards]map[string]int64
+	var historyClients map[int]map[int]map[string]int64
+	var stateMachine [shardctrler.NShards]map[string]string
+	var historyState map[int]map[int]map[string]string
+	var conf shardctrler.Config
+	var prevConf shardctrler.Config
+	var step int
+	var shardIdsToPull [shardctrler.NShards]bool
+	var shardIdsToDiscard [shardctrler.NShards]bool
 	if d.Decode(&clients) != nil ||
-		d.Decode(&state) != nil ||
-		d.Decode(&idx) != nil {
+		d.Decode(&historyClients) != nil ||
+		d.Decode(&stateMachine) != nil ||
+		d.Decode(&historyState) != nil ||
+		d.Decode(&conf) != nil ||
+		d.Decode(&prevConf) != nil ||
+		d.Decode(&step) != nil ||
+		d.Decode(&shardIdsToPull) != nil ||
+		d.Decode(&shardIdsToDiscard) != nil {
 		panic("BAD KV PERSIST")
 	} else {
 		kv.clients = clients
-		kv.stateMachine = state
-		kv.lastAppliedIdx = idx
+		kv.historyClients = historyClients
+		kv.stateMachine = stateMachine
+		kv.historyState = historyState
+		kv.conf = conf
+		kv.prevConf = prevConf
+		kv.step = step
+		kv.ShardIdsToPull = shardIdsToPull
+		kv.ShardIdsToDiscard = shardIdsToDiscard
 	}
 }
 

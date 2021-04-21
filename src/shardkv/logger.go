@@ -19,6 +19,7 @@ func (kv *ShardKV) Log(format string, info ...interface{}) {
 	}
 	str := fmt.Sprintf("%v [KV %d]",
 		time.Now().Format("15:04:05.000"), kv.me)
+	str += fmt.Sprintf("Prev-Conf:%d,Conf:%d,Step:%d,ToPull:%+v", kv.conf.Num, kv.prevConf.Num, kv.step, kv.ShardIdsToPull)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)

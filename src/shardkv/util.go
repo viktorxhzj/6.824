@@ -51,7 +51,7 @@ func GenerateClerkId() string {
 func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	kv.Debug("")
+	fmt.Printf("****[KV %d CRASHED]****\n", kv.me)
 	// Your code here, if desired.
 }
 
@@ -76,8 +76,8 @@ func init() {
 	labgob.Register(raft.InstallSnapshotRequest{})
 	labgob.Register(raft.InstallSnapshotResponse{})
 
-	labgob.Register(RaftRequest{})
-	labgob.Register(RaftResponse{})
+	labgob.Register(GeneralInput{})
+	labgob.Register(GeneralOutput{})
 	labgob.Register(shardctrler.JoinRequest{})
 	labgob.Register(shardctrler.JoinResponse{})
 

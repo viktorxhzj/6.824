@@ -24,11 +24,20 @@ type ShardKV struct {
 
 
 	// 持久化信息
-	clients      map[string]int64                       // sequence number for each known client
+	clients      [shardctrler.NShards]map[string]int64                       // sequence number for each known client
 	stateMachine [shardctrler.NShards]map[string]string // state machine
-	lastAppliedIdx int
+	historyState map[int]map[int]map[string]string // configNum -> shard -> data
+	historyClients map[int]map[int]map[string]int64
+
 	conf     shardctrler.Config // latest config
 	prevConf shardctrler.Config // previous config
+	step int // 负数代表正在reconfiguration, 绝对值等于还缺少的分片数量
+
+	// 当采用新的配置时，记录需要拉取的分片，已经拉取的分片和需要丢弃的分片
+	// 轮询拉取需要拉取的分片i，拉取成功并成功应用时，该分片被置为已拉取
+	// 轮询通知需要丢弃已拉取的分片，接受成功并成功应用时，丢弃该分片并置为已丢弃
+	ShardIdsToPull [shardctrler.NShards]bool
+	ShardIdsToDiscard [shardctrler.NShards]bool
 
 
 	rf           *raft.Raft
@@ -51,13 +60,12 @@ func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 	}
 
 	resp := kv.tryApplyAndGetResult(req)
-	if reply.RPCInfo = resp.RPCInfo; reply.RPCInfo != SUCCEEDED_REQUEST {
-		return
-	}
+
 	// for debug printing
 	reply.Key = args.Key
 	reply.ClerkId = args.ClerkId
-	reply.Value = resp.Output.(string)
+	reply.RPCInfo = resp.RPCInfo
+	reply.Value = resp.Value
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
@@ -71,16 +79,20 @@ func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 	}
 
 	resp := kv.tryApplyAndGetResult(req)
-	if reply.RPCInfo = resp.RPCInfo; reply.RPCInfo != SUCCEEDED_REQUEST {
-		return
-	}
+
 	// for debug printing
 	reply.Key = args.Key
 	reply.ClerkId = args.ClerkId
 	reply.OpType = args.OpType
-	reply.Value = resp.Output.(string)
 	reply.RPCInfo = resp.RPCInfo
+	reply.Value = resp.Value
 }
+
+func (kv *ShardKV) PullShard(args *PutAppendRequest, reply *PutAppendResponse) {}
+
+func (kv *ShardKV) RemoveShard(args *PutAppendRequest, reply *PutAppendResponse) {}
+
+
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -121,13 +133,20 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.scc = shardctrler.MakeClerk(ctrlers)
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
-	kv.clients = make(map[string]int64)
 	kv.distros = make(map[int]map[int]chan GeneralOutput)
+
+	for i := 0; i < shardctrler.NShards; i++ {
+		kv.clients[i] = make(map[string]int64)
+		kv.stateMachine[i] = make(map[string]string)
+	}
+
+	kv.historyClients = make(map[int]map[int]map[string]int64)
+	kv.historyState = make(map[int]map[int]map[string]string)
 
 
 	go kv.executeLoop()
 	go kv.configListenLoop()
+	go kv.pullShardLoop()
 
 	return kv
 }
