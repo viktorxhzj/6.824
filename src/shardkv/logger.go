@@ -10,7 +10,7 @@ import (
 
 var (
 	EnableDebug   = 1
-	EnableConsole = 0
+	EnableConsole = 1
 	EnableFile    = 1
 )
 
@@ -18,16 +18,16 @@ func (kv *ShardKV) Log(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [KV %d-%d]",
-		time.Now().Format("15:04:05.000"), kv.gid, kv.me)
-	str += fmt.Sprintf("old-Conf:%d,Conf:%d,Step:%d,", kv.oldConf.Num, kv.conf.Num, kv.step)
+	str := time.Now().Format("15:04:05.000")
+	str += fmt.Sprintf(" Conf%d->%d,Step:%d,", kv.oldConf.Num, kv.conf.Num, kv.step)
 	var his []ShardInfo
 	for i := 0; i < shardctrler.NShards; i++ {
 		for k := range kv.historyState[i] {
 			his = append(his, ShardInfo{Shard: i, ConfigNum: k})
 		}
 	}
-	str += fmt.Sprintf("His%+v  ", his)
+	str += fmt.Sprintf("His%+v", his)
+	str += fmt.Sprintf("[GROUP %d]  ", kv.gid)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
@@ -38,8 +38,8 @@ func (kv *ShardKV) Debug(format string, info ...interface{}) {
 	if EnableDebug == 0 {
 		return
 	}
-	str := fmt.Sprintf("%v [KV %d-%d]",
-		time.Now().Format("15:04:05.000"), kv.gid, kv.me)
+	str := time.Now().Format("15:04:05.000")
+	str += fmt.Sprintf("[GROUP %d]  ", kv.gid)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)

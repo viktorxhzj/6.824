@@ -5,6 +5,7 @@ import "6.824/raft"
 import "testing"
 import "os"
 
+// import "log"
 import crand "crypto/rand"
 import "math/rand"
 import "encoding/base64"
@@ -331,7 +332,7 @@ func (cfg *config) make_partition() ([]int, []int) {
 }
 
 func make_config(t *testing.T, n int, unreliable bool) *config {
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	runtime.GOMAXPROCS(4)
 	cfg := &config{}
 	cfg.t = t
 	cfg.net = labrpc.MakeNetwork()

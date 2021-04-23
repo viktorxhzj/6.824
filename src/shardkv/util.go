@@ -23,7 +23,7 @@ func (kv *ShardKV) lock(namespace string) {
 	kv.mu.Lock()
 	kv.lockname = namespace
 	kv.locktime = time.Now()
-	kv.Log("LOCK[%s]", namespace)
+	// kv.Log("LOCK[%s]", namespace)
 }
 
 func (kv *ShardKV) unlock() {

@@ -1,6 +1,9 @@
 package raft
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type (
 	RPCInfo int
@@ -11,7 +14,7 @@ const (
 	TIMER_BASE         = 200
 	TIMER_RANGE        = 300
 	HEARTBEAT_INTERVAL = 100
-	APPLY_INTERVAL     = 10
+	APPLY_INTERVAL     = 100 * time.Millisecond
 
 	FOLLOWER  = 0
 	CANDIDATE = 1

@@ -15,25 +15,27 @@ outer:
 			continue
 		}
 
-		t := time.NewTimer(2 * time.Second)
+		t := time.NewTimer(CONFIG_LISTEN_TIMEOUT)
 		ch := make(chan shardctrler.Config)
 		var config shardctrler.Config
-		go func(ch chan shardctrler.Config) { ch <- kv.scc.Query(-1) }(ch)
+		go func() { ch <- kv.scc.Query(-1) }()
 		select {
 		case <-t.C:
-			// fmt.Println("整活")
+			kv.Debug("监听配置超时")
 			continue outer
 		case config = <-ch:
-			kv.Debug("Normal Config Listen")
 		}
-		kv.lock("config listen")
-		kv.Log("Old Config %d %+v", kv.oldConf.Num, kv.oldConf.Shards)
-		kv.Log("Pulled Config %d %+v", config.Num, config.Shards)
+
+		// 并不是真正的可以canApply
+		var canApply bool
+		kv.lock("监听配置")
 		// 什么时候可以应用新的Config？
 		// 1. 新的Config更新
 		// 2. 当前不在reconfig
-		if config.Num > kv.conf.Num && kv.step == 0 {
-			kv.Log("try apply Config %d", config.Num)
+		canApply = config.Num > kv.conf.Num && kv.step == 0
+		kv.unlock()
+		if canApply {
+			// kv.Debug("try apply Config %d", config.Num)
 			// RPC的结果的需要Deep-Copy
 			cp := shardctrler.Config{}
 			shardctrler.CopyConfig(&cp, &config)
@@ -41,79 +43,10 @@ outer:
 				OpType: UPDATE_CONFIG,
 				Input:  cp,
 			})
-		}
-		kv.unlock()
-	}
-}
-
-// tryLoadConfiguration 试图应用一个Config
-func (kv *ShardKV) tryLoadConfiguration(r *GeneralInput) (success bool) {
-	config := r.Input.(shardctrler.Config)
-	// 再次确认是否可以应用
-	if config.Num <= kv.conf.Num || kv.step < 0 {
-		kv.Log("can't apply %+v", config)
-		return
-	}
-
-	// 此时 kv.ShardIdsToPull[i]是必然Pull完毕的，加上自己已经拥有的
-	// 可以确保该节点成功启用
-	// 但是 kv.ShardIdsToDiscard[i]有可能还有遗留的Shard没有清理
-	// 强保证和弱保证？
-	// 强保证就是必须清理全部遗留才可应用新Config
-	// 弱保证就是先应用新Config，然后后台协程清理。比如当前29，应用到30，则可开始清理<=28的。
-	// 弱保证至多保留一层数据，可以采用
-	// 采用弱保证方案的话step仅仅和pull挂钩
-
-	success = true
-	// 现在的config成为旧的config
-	var oldConfig shardctrler.Config
-	shardctrler.CopyConfig(&oldConfig, &kv.conf)
-
-	// 对初始化的特殊判断
-	if oldConfig.Num == 0 {
-		shardctrler.CopyConfig(&kv.conf, &config)
-		kv.oldConf = oldConfig
-		return
-	}
-
-	for sIdx, ngid := range config.Shards {
-		ogid := oldConfig.Shards[sIdx]
-		switch {
-		// 已经拥有的分片
-		case ogid == kv.gid && ngid == kv.gid:
-
-		// 需要取的分片
-		case ogid != kv.gid && ngid == kv.gid:
-			kv.ShardIdsToPull[sIdx] = true
-			kv.step--
-
-		// 需要给出的分片
-		case ogid == kv.gid && ngid != kv.gid:
-			kv.ShardIdsToDiscard[sIdx] = true
-			// 将分片数据、和判断幂等的信息转移，然后清空当前分片数据和幂等信息
-			state := kv.stateMachine[sIdx]
-			kv.historyState[sIdx][oldConfig.Num] = state
-			kv.stateMachine[sIdx] = make(map[string]string)
-			clients := kv.clients[sIdx]
-			kv.historyClients[sIdx][oldConfig.Num] = clients
-			kv.clients[sIdx] = make(map[string]int64)
-		// 无关的分片
-		default:
+		} else {
+			// kv.Debug("cannot apply Config %d", config.Num)
 		}
 	}
-
-	// 更新新的config和旧的config
-	shardctrler.CopyConfig(&kv.conf, &config)
-	kv.oldConf = oldConfig
-
-	// 至此，
-	// step=需要拉取的分片数
-	// ShardIdsToPull记录哪些分片需要拉取
-	// 已经是新的Config
-	// 非当前分片的数据已转移至历史区域
-	// 紧接着需要立即持久化
-	kv.Log("成功应用新Config%d", kv.conf.Num)
-	return
 }
 
 func (kv *ShardKV) pullShardLoop() {
@@ -132,10 +65,36 @@ func (kv *ShardKV) pullShardLoop() {
 		}
 
 		// 对于每一个还需要拉取的分片
-		for i := range kv.ShardIdsToPull {
-			if kv.ShardIdsToPull[i] {
-				kv.Log("Pull Shard %d", i)
+		for i := range kv.ShardsToPull {
+			if kv.ShardsToPull[i] {
 				go kv.pullShard(i)
+			}
+		}
+		kv.unlock()
+	}
+}
+
+// 对于已经拉取到的分片，通知对应集群清理
+// a.ShardsToPull=true, b.ShardsToDiscard=true -> a拉取b -> a装载 -> a.ShardsToPull=false -> a.ShardsToInfoDiscard=true
+// -> a通知b清理 -> b清理 -> b.ShardsToDiscard=false -> a得知b已清理 -> a.ShardsToInfoDiscard=false
+func (kv *ShardKV) infoCleanShardLoop() {
+	for !kv.killed() {
+		time.Sleep(INFO_CLEAN_INTERVAL)
+		if _, leader := kv.rf.GetState(); !leader {
+			continue
+		}
+		kv.lock("clean shard")
+		// 如何判断已经拉取的分片？
+		if kv.step == 0 {
+			kv.unlock()
+			continue
+		}
+
+		for i := range kv.ShardsToInfoDiscard {
+			if kv.ShardsToInfoDiscard[i] {
+				gid := kv.oldConf.Shards[i]
+				servers := kv.oldConf.Groups[gid]
+				go kv.infoCleanShard(ShardInfo{Shard: i, ConfigNum: kv.oldConf.Num}, servers)
 			}
 		}
 		kv.unlock()
@@ -167,7 +126,7 @@ func (kv *ShardKV) pullShard(sIdx int) {
 		// 4. 该分片已经拉过了
 		_, leader := kv.rf.GetState()
 		kv.lock("pull shard each")
-		if !leader || kv.oldConf.Num > req.ConfigNum || kv.step == 0 || !kv.ShardIdsToPull[sIdx] {
+		if !leader || kv.oldConf.Num > req.ConfigNum || kv.step == 0 || !kv.ShardsToPull[sIdx] {
 			kv.unlock()
 			return
 		}
@@ -189,62 +148,13 @@ func (kv *ShardKV) pullShard(sIdx int) {
 		kv.unlock()
 
 		kv.rf.Start(GeneralInput{
-			OpType: PULL_SHARD,
+			OpType: LOAD_SHARD,
 			Input: PullShardData{
 				ShardInfo:    req.ShardInfo,
 				Clients:      client,
 				StateMachine: state,
 			},
 		})
-	}
-}
-
-func (kv *ShardKV) tryLoadShard(r *GeneralInput) (success bool) {
-	data := r.Input.(PullShardData)
-
-	if data.ConfigNum != kv.oldConf.Num || kv.step == 0 || !kv.ShardIdsToPull[data.Shard] {
-		return
-	}
-	success = true
-	kv.ShardIdsToPull[data.Shard] = false
-	kv.step++
-	kv.stateMachine[data.Shard] = make(map[string]string)
-	for k, v := range data.StateMachine {
-		kv.stateMachine[data.Shard][k] = v
-	}
-	kv.clients[data.Shard] = make(map[string]int64)
-	for k, v := range data.Clients {
-		kv.clients[data.Shard][k] = v
-	}
-	return
-}
-
-func (kv *ShardKV) infoCleanShardLoop() {
-	for !kv.killed() {
-		time.Sleep(INFO_CLEAN_INTERVAL)
-		if _, leader := kv.rf.GetState(); !leader {
-			continue
-		}
-		kv.lock("clean shard")
-		// 如何判断已经拉取的分片？
-		if kv.oldConf.Num == 0 {
-			kv.unlock()
-			continue
-		}
-		for sIdx, ngid := range kv.conf.Shards {
-			ogid := kv.oldConf.Shards[sIdx]
-			if ogid != kv.gid && ngid == kv.gid && !kv.ShardIdsToPull[sIdx] {
-				gid := kv.oldConf.Shards[sIdx]
-				servers := kv.oldConf.Groups[gid]
-				shardInfo := ShardInfo{
-					ConfigNum: kv.oldConf.Num,
-					Shard:     sIdx,
-				}
-				kv.Log("info clean shard %+v", shardInfo)
-				go kv.infoCleanShard(shardInfo, servers)
-			}
-		}
-		kv.unlock()
 	}
 }
 
@@ -255,79 +165,136 @@ func (kv *ShardKV) infoCleanShard(si ShardInfo, servers []string) {
 		srvi := kv.make_end(srv)
 		srvi.Call("ShardKV.CleanShard", &req, &resp)
 		if resp.RPCInfo == SUCCEEDED_REQUEST || resp.RPCInfo == ALREADY_CLEAN {
+			kv.rf.Start(GeneralInput{OpType: CLEAN_INFO_SHARD, Input:si})
 			return
 		}
 	}
 }
 
-func (kv *ShardKV) cleanShardLoop() {
-	// for !kv.killed() {
-	// 	time.Sleep(CLEAN_SHARD_INTERVAL)
-	// 	if _, leader := kv.rf.GetState(); !leader {
-	// 		continue
-	// 	}
-	// 	kv.lock("clean shard loop")
-	// 	for i := kv.oldConf.Num - 1; i > 0; i-- {
-	// 		var count int
-	// 		for j := 0; j < shardctrler.NShards; j++ {
-	// 			// 有就去清除
-	// 			if _, ok := kv.historyState[j][i]; ok {
-	// 				kv.rf.Start(GeneralInput{
-	// 					OpType: ACTIVE_CLEAN_SHARD,
-	// 					Input: ShardInfo{
-	// 						ConfigNum: i,
-	// 						Shard:     j,
-	// 					},
-	// 				})
-	// 				count++
-	// 			}
-	// 		}
-	// 		if count == 0 {
-	// 			break
-	// 		}
-	// 	}
-	// 	kv.unlock()
+// tryLoadConfiguration 试图应用一个Config
+// 应用新Config的成功与失败是否应该需要知道？不需要。
+func (kv *ShardKV) tryLoadConfiguration(r *GeneralInput) (success bool) {
+	config := r.Input.(shardctrler.Config)
+	// 再次确认是否可以应用
+	if config.Num <= kv.conf.Num || kv.step < 0 {
+		// kv.Log("can't apply %+v", config)
+		return
+	}
 
-	// }
+	// 强保证就是必须清理全部遗留才可应用新Config
+
+	success = true
+	kv.Log("成功应用Config%d", config.Num)
+	// 现在的config成为旧的config
+	var oldConfig shardctrler.Config
+	shardctrler.CopyConfig(&oldConfig, &kv.conf)
+
+	// 对初始化的特殊判断
+	if oldConfig.Num == 0 {
+		shardctrler.CopyConfig(&kv.conf, &config)
+		kv.oldConf = oldConfig
+		return
+	}
+
+	for sIdx, ngid := range config.Shards {
+		ogid := oldConfig.Shards[sIdx]
+		switch {
+		// 已经拥有的分片
+		case ogid == kv.gid && ngid == kv.gid:
+
+		// 需要取的分片
+		case ogid != kv.gid && ngid == kv.gid:
+			kv.ShardsToPull[sIdx] = true
+			kv.step--
+
+		// 需要给出的分片
+		case ogid == kv.gid && ngid != kv.gid:
+			kv.ShardsToDiscard[sIdx] = true
+			// 将分片数据、和判断幂等的信息转移，然后清空当前分片数据和幂等信息
+			state := kv.state[sIdx]
+			kv.historyState[sIdx][oldConfig.Num] = state
+			kv.state[sIdx] = make(map[string]string)
+			clients := kv.clients[sIdx]
+			kv.historyClients[sIdx][oldConfig.Num] = clients
+			kv.clients[sIdx] = make(map[string]int64)
+			kv.step--
+		// 无关的分片
+		default:
+		}
+	}
+
+	// 更新新的config和旧的config
+	shardctrler.CopyConfig(&kv.conf, &config)
+	kv.oldConf = oldConfig
+
+	// 至此，
+	// step=需要拉取和删除的分片数
+	// ShardsToPull记录哪些分片需要拉取
+	// ShardsToDiscard记录哪些分片需要清除
+	// 已经是新的Config
+	// 非当前分片的数据已转移至历史区域
+	// 紧接着需要立即持久化
+	return
+}
+
+// tryLoadShard加载一个分片
+// 加载一个分片的成功与否是否需要知道？不需要。
+func (kv *ShardKV) tryLoadShard(r *GeneralInput) (success bool) {
+	data := r.Input.(PullShardData)
+
+	// 当且仅当该分片还需拉取
+	if data.ConfigNum != kv.oldConf.Num || kv.step == 0 || !kv.ShardsToPull[data.Shard] {
+		return
+	}
+	success = true
+	kv.Log("成功加载分片 %+v", data.ShardInfo)
+	kv.ShardsToPull[data.Shard] = false
+	kv.ShardsToInfoDiscard[data.Shard] = true
+	kv.state[data.Shard] = make(map[string]string)
+	for k, v := range data.StateMachine {
+		kv.state[data.Shard][k] = v
+	}
+	kv.clients[data.Shard] = make(map[string]int64)
+	for k, v := range data.Clients {
+		kv.clients[data.Shard][k] = v
+	}
+	return
+}
+
+func (kv *ShardKV) tryCleanInfoShard(idx, term int, r *GeneralInput) (success bool) {
+	data := r.Input.(ShardInfo)
+
+	// 当且仅当该分片还需删除
+	if data.ConfigNum != kv.oldConf.Num || kv.step == 0 || !kv.ShardsToInfoDiscard[data.Shard] {
+		return
+	}
+	success = true
+	kv.Log("成功通知清理分片%+v", data)
+	kv.ShardsToInfoDiscard[data.Shard] = false
+	kv.step++
+	return
 }
 
 func (kv *ShardKV) tryCleanShard(idx, term int, r *GeneralInput) (success bool) {
 	data := r.Input.(ShardInfo)
 
-	// 清除分片有两种可能
-	// 一种是oldConf所对应的ToDiscard分片
-	// 另一种是更早期的分片历史
-	if data.ConfigNum > kv.oldConf.Num {
-		if r.OpType == PASSIVE_CLEAN_SHARD {
-			if ch, ok := kv.distros[idx][term]; ok {
-				ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}
-				delete(kv.distros[idx], term)
-			}
+	// 当且仅当该分片还需删除
+	if data.ConfigNum != kv.oldConf.Num || kv.step == 0 || !kv.ShardsToDiscard[data.Shard] {
+		if ch, ok := kv.signalChans[idx][term]; ok {
+			ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}
+			delete(kv.signalChans[idx], term)
 		}
 		return
 	}
-	if data.ConfigNum == kv.oldConf.Num && !kv.ShardIdsToDiscard[data.Shard] {
-		if r.OpType == PASSIVE_CLEAN_SHARD {
-			if ch, ok := kv.distros[idx][term]; ok {
-				ch <- GeneralOutput{RPCInfo: ALREADY_CLEAN}
-				delete(kv.distros[idx], term)
-			}
-		}
-		return
-	}
-
-	kv.Log("删除分片 %+v", data)
 	success = true
-	if data.ConfigNum == kv.oldConf.Num {
-		kv.ShardIdsToDiscard[data.Shard] = false
-	}
+	kv.Log("成功清理分片%+v", data)
+	kv.ShardsToDiscard[data.Shard] = false
+	kv.step++
 	delete(kv.historyState[data.Shard], data.ConfigNum)
 	delete(kv.historyClients[data.Shard], data.ConfigNum)
-	if r.OpType == PASSIVE_CLEAN_SHARD {
-		if ch, ok := kv.distros[idx][term]; ok {
-			ch <- GeneralOutput{RPCInfo: SUCCEEDED_REQUEST}
-			delete(kv.distros[idx], term)
-		}
+	if ch, ok := kv.signalChans[idx][term]; ok {
+		ch <- GeneralOutput{RPCInfo: SUCCEEDED_REQUEST}
+		delete(kv.signalChans[idx], term)
 	}
 	return
 }

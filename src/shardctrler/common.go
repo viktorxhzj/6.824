@@ -29,13 +29,13 @@ const NShards = 10
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
 type Config struct {
-	Num    int              // config number
-	Shards [NShards]int     // shard -> gid
+	Num    int // config number
+	Shards [NShards]int
 	Groups map[int][]string // gid -> servers[]
 }
 
 const CLIENT_REQUEST_INTERVAL = 1400 * time.Millisecond
-const APPLY_TIMEOUT = 500 * time.Millisecond
+const INTERNAL_MAX_DURATION = 500 * time.Millisecond
 
 const (
 	JOIN  = "Join"
@@ -46,7 +46,7 @@ const (
 
 	SUCCESS           = "成功"
 	NETWORK_FAILURE   = "网络超时"
-	SERVER_TIMEOUT    = "内部超时"
+	INTERNAL_TIMEOUT    = "内部超时"
 	WRONG_LEADER      = "错误领袖"
 	FAILED_REQUEST    = "失败重试"
 	DUPLICATE_REQUEST = "幂等拦截"
@@ -116,7 +116,7 @@ func (c Config) String() string {
 	var str string
 	for i, g := range c.Shards {
 		str += strconv.Itoa(g)
-		if i != NShards - 1 {
+		if i != NShards-1 {
 			str += "|"
 		}
 	}

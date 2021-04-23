@@ -5,15 +5,14 @@ package shardctrler
 //
 
 import (
-	"sync/atomic"
-	"time"
-
 	"6.824/labrpc"
+	"sync/atomic"
 )
 
 type Clerk struct {
 	servers      []*labrpc.ClientEnd
 	size         int
+	recentLeader int32
 	ClerkId
 }
 
@@ -35,18 +34,22 @@ func (ck *Clerk) Query(num int) Config {
 		},
 	}
 
+	i := atomic.LoadInt32(&ck.recentLeader)
+
+	ck.Log("开始Query%+v", req)
+	defer ck.Log("成功Query%+v", req)
+
 	for {
 		// try each known server.
-		for i, srv := range ck.servers {
-			ck.Log("开始Query%+v [NODE %d]", req, i)
+		for range ck.servers {
 			var resp QueryResponse
-			srv.Call("ShardCtrler.Query", &req, &resp)
+			ck.servers[i].Call("ShardCtrler.Query", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
-				ck.Log("成功Query%+v", req)
+				atomic.SwapInt32(&ck.recentLeader, i)
 				return resp.Config
 			}
+			i = (i + 1) % int32(ck.size)
 		}
-		// time.Sleep(CLIENT_REQUEST_INTERVAL)
 	}
 }
 
@@ -59,22 +62,23 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		},
 	}
 
+	i := atomic.LoadInt32(&ck.recentLeader)
+
+	ck.Log("开始Join%+v", req)
+	defer ck.Log("成功Join%+v", req)
 	for {
 		// try each known server.
-		for i, srv := range ck.servers {
-			ck.Log("开始Join%+v [NODE %d]", req, i)
+		for range ck.servers {
 			var resp JoinResponse
-			srv.Call("ShardCtrler.Join", &req, &resp)
+			ck.servers[i].Call("ShardCtrler.Join", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
-				
-				time.Sleep(CLIENT_REQUEST_INTERVAL)
+				atomic.SwapInt32(&ck.recentLeader, i)
 				return
 			} else if resp.RPCInfo == DUPLICATE_REQUEST {
-				ck.Log("幂等拦截%+v", req)
 				return
 			}
+			i = (i + 1) % int32(ck.size)
 		}
-		// time.Sleep(CLIENT_REQUEST_INTERVAL * 2)
 	}
 }
 
@@ -87,23 +91,23 @@ func (ck *Clerk) Leave(gids []int) {
 		},
 	}
 
+	i := atomic.LoadInt32(&ck.recentLeader)
+
+	ck.Log("开始Leave%+v", req)
+	defer ck.Log("成功Leave%+v", req)
 	for {
 		// try each known server.
-		for i, srv := range ck.servers {
-			ck.Log("开始Leave%+v [NODE %d]", req, i)
+		for range ck.servers {
 			var resp LeaveResponse
-			srv.Call("ShardCtrler.Leave", &req, &resp)
+			ck.servers[i].Call("ShardCtrler.Leave", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
-//				ck.Log("成功Leave%+v", req)
-
-				time.Sleep(CLIENT_REQUEST_INTERVAL)
+				atomic.SwapInt32(&ck.recentLeader, i)
 				return
 			} else if resp.RPCInfo == DUPLICATE_REQUEST {
-				ck.Log("幂等拦截%+v", req)
 				return
 			}
+			i = (i + 1) % int32(ck.size)
 		}
-		// time.Sleep(CLIENT_REQUEST_INTERVAL * 2)
 	}
 }
 
@@ -119,20 +123,23 @@ func (ck *Clerk) Move(shard int, gid int) {
 		},
 	}
 
+	i := atomic.LoadInt32(&ck.recentLeader)
+
+	ck.Log("开始Move%+v", req)
+	defer ck.Log("成功Move%+v", req)
+
 	for {
 		// try each known server.
-		for i, srv := range ck.servers {
-			ck.Log("开始Move%+v [NODE %d]", req, i)
+		for range ck.servers {
 			var resp MoveResponse
-			srv.Call("ShardCtrler.Move", &req, &resp)
+			ck.servers[i].Call("ShardCtrler.Move", &req, &resp)
 			if resp.RPCInfo == SUCCESS {
-				ck.Log("成功Move%+v", req)
+				atomic.SwapInt32(&ck.recentLeader, i)
 				return
 			} else if resp.RPCInfo == DUPLICATE_REQUEST {
-				ck.Log("幂等拦截%+v", req)
 				return
 			}
+			i = (i + 1) % int32(ck.size)
 		}
-		// time.Sleep(CLIENT_REQUEST_INTERVAL)
 	}
 }

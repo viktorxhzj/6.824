@@ -26,7 +26,7 @@ main:
 
 		idx, term := msg.CommandIndex, msg.CommandTerm
 		r := msg.Command.(GeneralInput)
-		kv.Log("收到日志[%d|%d] %s", idx, term, r.OpType)
+		// kv.Log("收到日志[%d|%d] %s", idx, term, r.OpType)
 
 		switch r.OpType {
 		case GET, PUT, APPEND:
@@ -37,13 +37,17 @@ main:
 			if succeed := kv.tryLoadConfiguration(&r); succeed {
 				kv.mustSaveSnapshot(idx)
 			}
-		case PULL_SHARD:
+		case LOAD_SHARD:
 			if succeed := kv.tryLoadShard(&r); succeed {
 				kv.mustSaveSnapshot(idx)
 			}
 
-		case ACTIVE_CLEAN_SHARD, PASSIVE_CLEAN_SHARD:
+		case CLEAN_SHARD:
 			if succeed := kv.tryCleanShard(idx, term, &r); succeed {
+				kv.mustSaveSnapshot(idx)
+			}
+		case CLEAN_INFO_SHARD:
+			if succeed := kv.tryCleanInfoShard(idx, term, &r); succeed {
 				kv.mustSaveSnapshot(idx)
 			}
 
@@ -64,7 +68,7 @@ func (kv *ShardKV) tryLoadSnapshot(msg *raft.ApplyMsg) (succeed bool) {
 	kv.Log("收到快照{...=>[%d|%d]", msg.SnapshotIndex, msg.SnapshotTerm)
 	if kv.rf.CondInstallSnapshot(msg.SnapshotTerm, msg.SnapshotIndex, msg.Snapshot) {
 		kv.deserializeState(msg.Snapshot)
-		kv.cleanDistros(msg.SnapshotIndex)
+		kv.cleanSignalChans(msg.SnapshotIndex)
 	}
 	return
 }
@@ -82,7 +86,7 @@ func (kv *ShardKV) mustSaveSnapshot(lastIncludedIdx int) {
 		return
 	}
 	stateBytes := kv.serializeState()
-	kv.cleanDistros(lastIncludedIdx)
+	kv.cleanSignalChans(lastIncludedIdx)
 	kv.rf.Snapshot(lastIncludedIdx, stateBytes)
 }
 
@@ -91,30 +95,26 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 	s := key2shard(r.Key)
 	// 分片不对
 	if kv.conf.Num > 0 && kv.gid != kv.conf.Shards[s] {
-		if ch, ok := kv.distros[idx][term]; ok {
-			go func(ch chan GeneralOutput){ch <- GeneralOutput{RPCInfo: WRONG_GROUP}}(ch)
-			delete(kv.distros[idx], term)
+		if ch, ok := kv.signalChans[idx][term]; ok {
+			ch <- GeneralOutput{RPCInfo: WRONG_GROUP}
+			delete(kv.signalChans[idx], term)
 		}
 		return
 	}
 	// 分片正确，但是在等待数据
-	if kv.step < 0 && kv.ShardIdsToPull[s] {
-		if ch, ok := kv.distros[idx][term]; ok {
-			go func(ch chan GeneralOutput){ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}}(ch)
-			delete(kv.distros[idx], term)
+	if kv.step < 0 && kv.ShardsToPull[s] {
+		if ch, ok := kv.signalChans[idx][term]; ok {
+			ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}
+			delete(kv.signalChans[idx], term)
 		}
 		return
 	}
 
 	// 幂等性校验
-	if kv.clients[s] == nil {
-		kv.clients[s] = make(map[string]int64)
-	}
-	seq := kv.clients[s][r.Uid]
-	if r.OpType != GET && r.Seq <= seq {
-		if ch, ok := kv.distros[idx][term]; ok {
-			go func(ch chan GeneralOutput){ch <- GeneralOutput{RPCInfo: DUPLICATE_REQUEST}}(ch)
-			delete(kv.distros[idx], term)
+	if r.OpType != GET && r.Seq <= kv.clients[s][r.Uid] {
+		if ch, ok := kv.signalChans[idx][term]; ok {
+			ch <- GeneralOutput{RPCInfo: DUPLICATE_REQUEST}
+			delete(kv.signalChans[idx], term)
 		}
 		return
 	}
@@ -124,49 +124,40 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 	var val string
 	switch r.OpType {
 	case GET:
-		if kv.stateMachine[s] != nil {
-			val = kv.stateMachine[s][r.Key]
-		}
+		val = kv.state[s][r.Key]
 
 	case PUT:
-		if kv.stateMachine[s] == nil {
-			kv.stateMachine[s] = make(map[string]string)
-		}
-		kv.stateMachine[s][r.Key] = r.Value
-		val = kv.stateMachine[s][r.Key]
-		//kv.Log("RELATED STATE=[K:%s V:%s]", r.Key, val)
+		kv.state[s][r.Key] = r.Value
+		val = kv.state[s][r.Key]
 
 	case APPEND:
-		if kv.stateMachine[s] == nil {
-			kv.stateMachine[s] = make(map[string]string)
-		}
-		kv.stateMachine[s][r.Key] = kv.stateMachine[s][r.Key] + r.Value
-		val = kv.stateMachine[s][r.Key]
-		//kv.Log("RELATED STATE=[K:%s V:%s]", r.Key, val)
+		kv.state[s][r.Key] = kv.state[s][r.Key] + r.Value
+		val = kv.state[s][r.Key]
 	}
 
-	if ch, ok := kv.distros[idx][term]; ok {
-		go func(ch chan GeneralOutput, val string) {ch <- GeneralOutput{RPCInfo: SUCCEEDED_REQUEST, Value: val}}(ch, val)
-		delete(kv.distros[idx], term)
+	if ch, ok := kv.signalChans[idx][term]; ok {
+		ch <- GeneralOutput{RPCInfo: SUCCEEDED_REQUEST, Value: val}
+		delete(kv.signalChans[idx], term)
 	}
 	return
 }
 
+// tryApplyAndGetResult 向raft层发起一个共识请求，并返回共识结果
+// 有最大阻塞时间，保证不会永久阻塞
 func (kv *ShardKV) tryApplyAndGetResult(req GeneralInput) (resp GeneralOutput) {
-
-	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	idx, term, ok := kv.rf.Start(req)
 
 	if !ok {
 		resp.RPCInfo = WRONG_LEADER
 		return
 	}
+	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	kv.lock("try apply")
 
-	ch := make(chan GeneralOutput)
-	if mm := kv.distros[idx]; mm == nil {
+	ch := make(chan GeneralOutput, 1)
+	if mm := kv.signalChans[idx]; mm == nil {
 		mm = make(map[int]chan GeneralOutput)
-		kv.distros[idx] = mm
+		kv.signalChans[idx] = mm
 		mm[term] = ch
 	} else {
 		mm[term] = ch
@@ -174,18 +165,19 @@ func (kv *ShardKV) tryApplyAndGetResult(req GeneralInput) (resp GeneralOutput) {
 	kv.unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	t := time.NewTimer(INTERNAL_MAX_DURATION)
+	// 最多等待 INTERNAL_MAX_DURATION 后返回
+	t := time.NewTimer(INTERNAL_TIMEOUT)
 	select {
 	case resp = <-ch:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		kv.removeDistro(idx, term)
+		kv.removeSignalChan(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
 		return
 	case <-t.C:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		kv.removeDistro(idx, term)
+		kv.removeSignalChan(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
-		resp.RPCInfo = INTERNAL_TIMEOUT
+		resp.RPCInfo = FAILED_REQUEST
 		return
 	}
 }
@@ -195,13 +187,14 @@ func (kv *ShardKV) serializeState() []byte {
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.clients)
 	e.Encode(kv.historyClients)
-	e.Encode(kv.stateMachine)
+	e.Encode(kv.state)
 	e.Encode(kv.historyState)
 	e.Encode(kv.conf)
 	e.Encode(kv.oldConf)
 	e.Encode(kv.step)
-	e.Encode(kv.ShardIdsToPull)
-	e.Encode(kv.ShardIdsToDiscard)
+	e.Encode(kv.ShardsToPull)
+	e.Encode(kv.ShardsToDiscard)
+	e.Encode(kv.ShardsToInfoDiscard)
 	return w.Bytes()
 }
 
@@ -218,8 +211,9 @@ func (kv *ShardKV) deserializeState(data []byte) {
 	var conf shardctrler.Config
 	var prevConf shardctrler.Config
 	var step int
-	var shardIdsToPull [shardctrler.NShards]bool
-	var shardIdsToDiscard [shardctrler.NShards]bool
+	var shardsToPull [shardctrler.NShards]bool
+	var shardsToDiscard [shardctrler.NShards]bool
+	var shardsToInfoDiscard [shardctrler.NShards]bool
 	if d.Decode(&clients) != nil ||
 		d.Decode(&historyClients) != nil ||
 		d.Decode(&stateMachine) != nil ||
@@ -227,41 +221,38 @@ func (kv *ShardKV) deserializeState(data []byte) {
 		d.Decode(&conf) != nil ||
 		d.Decode(&prevConf) != nil ||
 		d.Decode(&step) != nil ||
-		d.Decode(&shardIdsToPull) != nil ||
-		d.Decode(&shardIdsToDiscard) != nil {
+		d.Decode(&shardsToPull) != nil ||
+		d.Decode(&shardsToDiscard) != nil ||
+		d.Decode(&shardsToInfoDiscard) != nil {
 		panic("BAD KV PERSIST")
 	} else {
 		kv.clients = clients
 		kv.historyClients = historyClients
-		kv.stateMachine = stateMachine
+		kv.state = stateMachine
 		kv.historyState = historyState
 		kv.conf = conf
 		kv.oldConf = prevConf
 		kv.step = step
-		kv.ShardIdsToPull = shardIdsToPull
-		kv.ShardIdsToDiscard = shardIdsToDiscard
+		kv.ShardsToPull = shardsToPull
+		kv.ShardsToDiscard = shardsToDiscard
+		kv.ShardsToInfoDiscard = shardsToInfoDiscard
 	}
 }
 
-func (kv *ShardKV) removeDistro(idx, term int) {
+func (kv *ShardKV) removeSignalChan(idx, term int) {
 	kv.lock("remove distro")
-	select {
-	case <-kv.distros[idx][term]:
-		delete(kv.distros[idx], term)
-	default:
-		delete(kv.distros[idx], term)
-	}
+	delete(kv.signalChans[idx], term)
 	kv.unlock()
 }
 
-func (kv *ShardKV) cleanDistros(uptoIdx int) {
-	for idx, v := range kv.distros {
+func (kv *ShardKV) cleanSignalChans(uptoIdx int) {
+	for idx, v := range kv.signalChans {
 		if idx <= uptoIdx {
 			for term, vv := range v {
 				vv <- GeneralOutput{RPCInfo: FAILED_REQUEST}
 				delete(v, term)
 			}
-			delete(kv.distros, idx)
+			delete(kv.signalChans, idx)
 		}
 	}
 }

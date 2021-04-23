@@ -7,14 +7,14 @@ import (
 
 func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
 
-	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	idx, term, ok := sc.rf.Start(req)
 	if !ok {
 		resp.RPCInfo = WRONG_LEADER
 		return
 	}
+	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	sc.lock("try apply")
-	ch := make(chan RaftResponse)
+	ch := make(chan RaftResponse, 1)
 	if mm := sc.distros[idx]; mm == nil {
 		mm = make(map[int]chan RaftResponse)
 		sc.distros[idx] = mm
@@ -25,8 +25,7 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse)
 	sc.unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	t := time.NewTimer(APPLY_TIMEOUT)
-	defer t.Stop()
+	t := time.NewTimer(INTERNAL_MAX_DURATION)
 	select {
 	case resp = <-ch:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
@@ -37,7 +36,7 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse)
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		sc.removeDistro(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
-		resp.RPCInfo = SERVER_TIMEOUT
+		resp.RPCInfo = INTERNAL_TIMEOUT
 		return
 	}
 }

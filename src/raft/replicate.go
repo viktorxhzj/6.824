@@ -20,7 +20,7 @@ func (rf *Raft) replicateLoop() {
 func (rf *Raft) applyLoop() {
 	for !rf.killed() {
 		rf.batchApply()
-		time.Sleep(APPLY_INTERVAL * time.Millisecond)
+		time.Sleep(APPLY_INTERVAL)
 	}
 }
 
