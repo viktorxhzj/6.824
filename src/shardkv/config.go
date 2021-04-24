@@ -1,21 +1,25 @@
 package shardkv
 
-import "6.824/shardctrler"
-import "6.824/labrpc"
-import "testing"
-import "os"
+import (
+	"os"
+	"testing"
 
-// import "log"
-import crand "crypto/rand"
-import "math/big"
-import "math/rand"
-import "encoding/base64"
-import "sync"
-import "runtime"
-import "6.824/raft"
-import "strconv"
-import "fmt"
-import "time"
+	"6.824/labrpc"
+	"6.824/shardctrler"
+
+	// import "log"
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"math/big"
+	"math/rand"
+	"runtime"
+	"strconv"
+	"sync"
+	"time"
+
+	"6.824/raft"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -379,4 +383,15 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 	cfg.net.Reliable(!unreliable)
 
 	return cfg
+}
+
+func (cfg *config) end() {
+	cfg.checkTimeout()
+	if !cfg.t.Failed() {
+		t := time.Since(cfg.start).Seconds()  // real time
+		npeers := cfg.n                    // number of Raft peers
+
+		fmt.Printf("  ... Passed --")
+		fmt.Printf("  %4.1f  %d\n", t, npeers)
+	}
 }

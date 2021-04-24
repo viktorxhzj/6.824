@@ -91,7 +91,7 @@ func TestStaticShards(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestJoinLeave(t *testing.T) {
@@ -144,7 +144,7 @@ func TestJoinLeave(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestSnapshot(t *testing.T) {
@@ -212,7 +212,7 @@ func TestSnapshot(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestMissChange(t *testing.T) {
@@ -243,7 +243,7 @@ func TestMissChange(t *testing.T) {
 	cfg.ShutdownServer(1, 0)
 	cfg.ShutdownServer(2, 0)
 
-	cfg.join(2) // C3 [0 0 0 0 1 1 1 2 2 2]
+	cfg.join(2)  // C3 [0 0 0 0 1 1 1 2 2 2]
 	cfg.leave(1) // C4 [0 0 0 0 0 2 2 2 2 2]
 	cfg.leave(0) // C5 [2 2 2 2 2 2 2 2 2 2]
 
@@ -298,7 +298,7 @@ func TestMissChange(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestConcurrent1(t *testing.T) {
@@ -375,7 +375,7 @@ func TestConcurrent1(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 //
@@ -450,7 +450,7 @@ func TestConcurrent2(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestConcurrent3(t *testing.T) {
@@ -518,7 +518,7 @@ func TestConcurrent3(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestUnreliable1(t *testing.T) {
@@ -560,7 +560,7 @@ func TestUnreliable1(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestUnreliable2(t *testing.T) {
@@ -623,7 +623,7 @@ func TestUnreliable2(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 func TestUnreliable3(t *testing.T) {
@@ -728,7 +728,7 @@ func TestUnreliable3(t *testing.T) {
 		fmt.Println("info: linearizability check timed out, assuming history is ok")
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 //
@@ -813,7 +813,7 @@ func TestChallenge1Delete(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 //
@@ -883,7 +883,7 @@ func TestChallenge2Unaffected(t *testing.T) {
 		}
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }
 
 //
@@ -944,5 +944,5 @@ func TestChallenge2Partial(t *testing.T) {
 		}
 	}
 
-	fmt.Printf("  ... Passed\n")
+	cfg.end()
 }

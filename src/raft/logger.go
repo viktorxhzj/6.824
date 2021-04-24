@@ -10,7 +10,7 @@ var (
 	File          *os.File
 	Prefix        = "../logs/"
 	Suffix        = ".logger"
-	EnableDebug   = 1
+	EnableDebug   = 0
 	EnableConsole = 0
 	EnableFile    = 0
 )

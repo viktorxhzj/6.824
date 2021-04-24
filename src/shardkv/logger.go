@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	EnableDebug   = 1
+	EnableDebug   = 0
 	EnableConsole = 1
 	EnableFile    = 1
 )
