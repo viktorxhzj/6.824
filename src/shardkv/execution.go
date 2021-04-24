@@ -38,16 +38,12 @@ main:
 				kv.mustSaveSnapshot(idx)
 			}
 		case LOAD_SHARD:
-			if succeed := kv.tryLoadShard(&r); succeed {
+			if succeed := kv.tryLoadShard(idx, term, &r); succeed {
 				kv.mustSaveSnapshot(idx)
 			}
 
 		case CLEAN_SHARD:
 			if succeed := kv.tryCleanShard(idx, term, &r); succeed {
-				kv.mustSaveSnapshot(idx)
-			}
-		case CLEAN_INFO_SHARD:
-			if succeed := kv.tryCleanInfoShard(idx, term, &r); succeed {
 				kv.mustSaveSnapshot(idx)
 			}
 
@@ -94,7 +90,7 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 	// 分片校验
 	s := key2shard(r.Key)
 	// 分片不对
-	if kv.conf.Num > 0 && kv.gid != kv.conf.Shards[s] {
+	if kv.shardState[s] == NOTINCHARGE || kv.shardState[s] == TRANSFERRING {
 		if ch, ok := kv.signalChans[idx][term]; ok {
 			ch <- GeneralOutput{RPCInfo: WRONG_GROUP}
 			delete(kv.signalChans[idx], term)
@@ -102,7 +98,7 @@ func (kv *ShardKV) tryExecuteCommand(idx, term int, r *GeneralInput) (succeed bo
 		return
 	}
 	// 分片正确，但是在等待数据
-	if kv.step < 0 && kv.ShardsToPull[s] {
+	if kv.shardState[s] == RECEIVING {
 		if ch, ok := kv.signalChans[idx][term]; ok {
 			ch <- GeneralOutput{RPCInfo: FAILED_REQUEST}
 			delete(kv.signalChans[idx], term)
@@ -177,7 +173,7 @@ func (kv *ShardKV) tryApplyAndGetResult(req GeneralInput) (resp GeneralOutput) {
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		kv.removeSignalChan(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
-		resp.RPCInfo = FAILED_REQUEST
+		resp.RPCInfo = APPLY_TIMEOUT
 		return
 	}
 }
@@ -186,15 +182,9 @@ func (kv *ShardKV) serializeState() []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.clients)
-	e.Encode(kv.historyClients)
 	e.Encode(kv.state)
-	e.Encode(kv.historyState)
 	e.Encode(kv.conf)
-	e.Encode(kv.oldConf)
-	e.Encode(kv.step)
-	e.Encode(kv.ShardsToPull)
-	e.Encode(kv.ShardsToDiscard)
-	e.Encode(kv.ShardsToInfoDiscard)
+	e.Encode(kv.shardState)
 	return w.Bytes()
 }
 
@@ -205,37 +195,19 @@ func (kv *ShardKV) deserializeState(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var clients [shardctrler.NShards]map[string]int64
-	var historyClients [shardctrler.NShards]map[int]map[string]int64
-	var stateMachine [shardctrler.NShards]map[string]string
-	var historyState [shardctrler.NShards]map[int]map[string]string
+	var state [shardctrler.NShards]map[string]string
 	var conf shardctrler.Config
-	var prevConf shardctrler.Config
-	var step int
-	var shardsToPull [shardctrler.NShards]bool
-	var shardsToDiscard [shardctrler.NShards]bool
-	var shardsToInfoDiscard [shardctrler.NShards]bool
+	var shardsState [shardctrler.NShards]int
 	if d.Decode(&clients) != nil ||
-		d.Decode(&historyClients) != nil ||
-		d.Decode(&stateMachine) != nil ||
-		d.Decode(&historyState) != nil ||
+		d.Decode(&state) != nil ||
 		d.Decode(&conf) != nil ||
-		d.Decode(&prevConf) != nil ||
-		d.Decode(&step) != nil ||
-		d.Decode(&shardsToPull) != nil ||
-		d.Decode(&shardsToDiscard) != nil ||
-		d.Decode(&shardsToInfoDiscard) != nil {
+		d.Decode(&shardsState) != nil {
 		panic("BAD KV PERSIST")
 	} else {
 		kv.clients = clients
-		kv.historyClients = historyClients
-		kv.state = stateMachine
-		kv.historyState = historyState
+		kv.state = state
 		kv.conf = conf
-		kv.oldConf = prevConf
-		kv.step = step
-		kv.ShardsToPull = shardsToPull
-		kv.ShardsToDiscard = shardsToDiscard
-		kv.ShardsToInfoDiscard = shardsToInfoDiscard
+		kv.shardState = shardsState
 	}
 }
 

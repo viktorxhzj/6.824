@@ -36,8 +36,8 @@ func (ck *Clerk) Query(num int) Config {
 
 	i := atomic.LoadInt32(&ck.recentLeader)
 
-	ck.Log("开始Query%+v", req)
-	defer ck.Log("成功Query%+v", req)
+	// ck.Log("开始Query%+v", req)
+	// defer ck.Log("成功Query%+v", req)
 
 	for {
 		// try each known server.

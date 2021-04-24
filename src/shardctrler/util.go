@@ -28,6 +28,8 @@ func (sc *ShardCtrler) lock(namespace string) {
 func (sc *ShardCtrler) unlock() {
 	if d := time.Since(sc.lockTime); d >= LOCK_TIMEOUT {
 		panic(fmt.Sprintf("[KV %d] UNLOCK[%s] too long, cost %+v", sc.me, sc.lockName, d))
+	} else if sc.lockName == "execute loop" {
+		// fmt.Printf("QUERY COST=%+v\n", d)
 	}
 	sc.mu.Unlock()
 }

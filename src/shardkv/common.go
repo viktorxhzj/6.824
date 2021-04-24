@@ -15,13 +15,13 @@ import (
 //
 
 const (
-	GET                = "Get"
-	PUT                = "Put"
-	APPEND             = "Append"
-	LOAD_SHARD         = "加载分片"
-	CLEAN_SHARD        = "清理分片"
-	CLEAN_INFO_SHARD   = "清理通知分片"
-	UPDATE_CONFIG      = "更改配置"
+	GET              = "Get"
+	PUT              = "Put"
+	APPEND           = "Append"
+	LOAD_SHARD       = "加载分片"
+	CLEAN_SHARD      = "清理分片"
+	CLEAN_INFO_SHARD = "清理通知分片"
+	UPDATE_CONFIG    = "更改配置"
 
 	SUCCEEDED_REQUEST = "成功请求"
 	FAILED_REQUEST    = "失败请求"
@@ -30,14 +30,28 @@ const (
 	WRONG_LEADER      = "错误领袖"
 	WRONG_GROUP       = "错误集群"
 	ALREADY_CLEAN     = "已经删除"
+	APPLY_TIMEOUT     = "请求超时"
 
-	CONFIG_LISTEN_INTERVAL = 50 * time.Millisecond // 监听多集群配置变化的间隔时间
-	CONFIG_LISTEN_TIMEOUT = 200 * time.Millisecond
-	SHARD_PULL_INTERVAL    = 100 * time.Millisecond
-	INFO_CLEAN_INTERVAL    = 1000 * time.Millisecond
-	CLEAN_SHARD_INTERVAL   = 1000 * time.Millisecond
-	INTERNAL_TIMEOUT  = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
-	LOCK_TIMEOUT           = 2000 * time.Millisecond
+	SHARD_OPERATION_INTERVAL = 100 * time.Millisecond
+	CONFIG_LISTEN_INTERVAL   = 100 * time.Millisecond // 监听多集群配置变化的间隔时间
+	CONFIG_LISTEN_TIMEOUT    = 1000 * time.Millisecond
+	SHARD_PULL_INTERVAL      = 100 * time.Millisecond
+	INFO_CLEAN_INTERVAL      = 1000 * time.Millisecond
+	CLEAN_SHARD_INTERVAL     = 1000 * time.Millisecond
+	INTERNAL_TIMEOUT         = 500 * time.Millisecond // 内部逻辑处理最大允许时长，超时后RPC将提前返回
+	LOCK_TIMEOUT             = 1000 * time.Millisecond
+)
+
+// 一个分片尽可能涉及以下几种状态：
+// 不在该集群中
+// 不在该集群中，由该集群负责
+// 在该集群中，由该集群负责
+// 在该集群中，不由该集群负责，转移中
+const (
+	NOTINCHARGE  = 0
+	RECEIVING    = -2
+	INCHARGE     = 1
+	TRANSFERRING = 2
 )
 
 type ClerkId struct {
@@ -87,25 +101,28 @@ type GetResponse struct {
 }
 
 type ShardInfo struct {
+	Gid       int
 	ConfigNum int
 	Shard     int
 }
 
-type PullShardRequest struct {
-	ShardInfo
+type TargetInfo struct {
+	ConfigNum int
+	Servers   []string
 }
 
-type PullShardResponse struct {
-	ShardInfo
-	StateMachine map[string]string
-	Clients      map[string]int64
-	RPCInfo      string
+type ReceiveShardRequest struct {
+	ShardData
 }
 
-type PullShardData struct {
+type ReceiveShardResponse struct {
+	RPCInfo string
+}
+
+type ShardData struct {
 	ShardInfo
-	StateMachine map[string]string
-	Clients      map[string]int64
+	State   map[string]string
+	Clients map[string]int64
 }
 
 type CleanShardRequest struct {
@@ -138,5 +155,5 @@ func (r GetResponse) String() string {
 }
 
 func (s ShardInfo) String() string {
-	return fmt.Sprintf("[S:%d|C:%d]", s.Shard, s.ConfigNum)
+	return fmt.Sprintf("[S:%d|C:%d|GID:%d]", s.Shard, s.ConfigNum, s.Gid)
 }

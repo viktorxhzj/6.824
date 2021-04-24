@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"6.824/raft"
-	"6.824/shardctrler"
 )
 
 var (
@@ -19,15 +18,8 @@ func (kv *ShardKV) Log(format string, info ...interface{}) {
 		return
 	}
 	str := time.Now().Format("15:04:05.000")
-	str += fmt.Sprintf(" Conf%d->%d,Step:%d,", kv.oldConf.Num, kv.conf.Num, kv.step)
-	var his []ShardInfo
-	for i := 0; i < shardctrler.NShards; i++ {
-		for k := range kv.historyState[i] {
-			his = append(his, ShardInfo{Shard: i, ConfigNum: k})
-		}
-	}
-	str += fmt.Sprintf("His%+v", his)
-	str += fmt.Sprintf("[GROUP %d]  ", kv.gid)
+	str += fmt.Sprintf(" C:%d,STATE:%+v", kv.conf.Num, kv.shardState)
+	str += fmt.Sprintf("[GROUP %d NODE %d]  ", kv.gid, kv.me)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)
@@ -39,7 +31,7 @@ func (kv *ShardKV) Debug(format string, info ...interface{}) {
 		return
 	}
 	str := time.Now().Format("15:04:05.000")
-	str += fmt.Sprintf("[GROUP %d]  ", kv.gid)
+	str += fmt.Sprintf("[GROUP %d NODE %d]  ", kv.gid, kv.me)
 	str += fmt.Sprintf(format, info...)
 	str += "\n"
 	write(str)

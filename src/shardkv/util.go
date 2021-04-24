@@ -75,7 +75,7 @@ func init() {
 	labgob.Register(raft.InstallSnapshotRequest{})
 	labgob.Register(raft.InstallSnapshotResponse{})
 
-	labgob.Register(PullShardData{})
+	labgob.Register(ShardData{})
 	labgob.Register(ShardInfo{})
 
 	labgob.Register(GeneralInput{})

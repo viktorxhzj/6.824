@@ -223,7 +223,7 @@ func TestMissChange(t *testing.T) {
 
 	ck := cfg.makeClient()
 
-	cfg.join(0)
+	cfg.join(0) // C1 [0 0 0 0 0 0 0 0 0 0]
 
 	n := 10
 	ka := make([]string, n)
@@ -237,15 +237,15 @@ func TestMissChange(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
-	cfg.join(1)
+	cfg.join(1) // C2 [0 0 0 0 0 1 1 1 1 1]
 
 	cfg.ShutdownServer(0, 0)
 	cfg.ShutdownServer(1, 0)
 	cfg.ShutdownServer(2, 0)
 
-	cfg.join(2)
-	cfg.leave(1)
-	cfg.leave(0)
+	cfg.join(2) // C3 [0 0 0 0 1 1 1 2 2 2]
+	cfg.leave(1) // C4 [0 0 0 0 0 2 2 2 2 2]
+	cfg.leave(0) // C5 [2 2 2 2 2 2 2 2 2 2]
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
