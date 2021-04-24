@@ -7,5 +7,5 @@
 - Lab 3A (done) passed 80 tests, passed regressio testing
 - Lab 3B (done) passed 80 tests, passed regressio testing
 - Lab 4A (done) passed 100 tests
-- Lab 4B (done) passed 2 tests
+- Lab 4B (done) passed 50 tests
 
