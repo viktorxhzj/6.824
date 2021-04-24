@@ -62,13 +62,13 @@ type config struct {
 
 	nctrlers      int
 	ctrlerservers []*shardctrler.ShardCtrler
-	mck           *shardctrler.Clerk
+	mck           *shardctrler.Client
 
 	ngroups int
 	n       int // servers per k/v group
 	groups  []*group
 
-	clerks       map[*Clerk][]string
+	clerks       map[*Client][]string
 	nextClientId int
 	maxraftstate int
 }
@@ -119,7 +119,7 @@ func (cfg *config) servername(gid int, i int) string {
 	return "server-" + strconv.Itoa(gid) + "-" + strconv.Itoa(i)
 }
 
-func (cfg *config) makeClient() *Clerk {
+func (cfg *config) makeClient() *Client {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 
@@ -145,7 +145,7 @@ func (cfg *config) makeClient() *Clerk {
 	return ck
 }
 
-func (cfg *config) deleteClient(ck *Clerk) {
+func (cfg *config) deleteClient(ck *Client) {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 
@@ -293,7 +293,7 @@ func (cfg *config) StartCtrlerserver(i int) {
 	cfg.net.AddServer(cfg.ctrlername(i), srv)
 }
 
-func (cfg *config) shardclerk() *shardctrler.Clerk {
+func (cfg *config) shardclerk() *shardctrler.Client {
 	// ClientEnds to talk to ctrler service.
 	ends := make([]*labrpc.ClientEnd, cfg.nctrlers)
 	for j := 0; j < cfg.nctrlers; j++ {
@@ -303,7 +303,7 @@ func (cfg *config) shardclerk() *shardctrler.Clerk {
 		cfg.net.Enable(name, true)
 	}
 
-	return shardctrler.MakeClerk(ends)
+	return shardctrler.MakeClient(ends)
 }
 
 // tell the shardctrler that a group is joining.
@@ -377,7 +377,7 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 		}
 	}
 
-	cfg.clerks = make(map[*Clerk][]string)
+	cfg.clerks = make(map[*Client][]string)
 	cfg.nextClientId = cfg.n + 1000 // client ids start 1000 above the highest serverid
 
 	cfg.net.Reliable(!unreliable)
@@ -388,8 +388,8 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 func (cfg *config) end() {
 	cfg.checkTimeout()
 	if !cfg.t.Failed() {
-		t := time.Since(cfg.start).Seconds()  // real time
-		npeers := cfg.n                    // number of Raft peers
+		t := time.Since(cfg.start).Seconds() // real time
+		npeers := cfg.n                      // number of Raft peers
 
 		fmt.Printf("  ... Passed --")
 		fmt.Printf("  %4.1f  %d\n", t, npeers)

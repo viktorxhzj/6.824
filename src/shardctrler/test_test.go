@@ -2,6 +2,7 @@ package shardctrler
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 
 // import "time"
 
-func check(t *testing.T, groups []int, ck *Clerk) {
+func check(t *testing.T, groups []int, ck *Client) {
 	c := ck.Query(-1)
 	if len(c.Groups) != len(groups) {
 		t.Fatalf("wanted %v groups, got %v", len(groups), len(c.Groups))
@@ -38,7 +39,7 @@ func check(t *testing.T, groups []int, ck *Clerk) {
 	for _, g := range c.Shards {
 		counts[g] += 1
 	}
-	min := 257
+	min := math.MaxInt32
 	max := 0
 	for g, _ := range c.Groups {
 		if counts[g] > max {
@@ -54,7 +55,7 @@ func check(t *testing.T, groups []int, ck *Clerk) {
 }
 
 func check_same_config(t *testing.T, c1 Config, c2 Config) {
-	if c1.Num != c2.Num {
+	if c1.Idx != c2.Idx {
 		t.Fatalf("Num wrong")
 	}
 	if c1.Shards != c2.Shards {
@@ -126,7 +127,7 @@ func TestBasic(t *testing.T) {
 	for s := 0; s < nservers; s++ {
 		cfg.ShutdownServer(s)
 		for i := 0; i < len(cfa); i++ {
-			c := ck.Query(cfa[i].Num)
+			c := ck.Query(cfa[i].Idx)
 			check_same_config(t, c, cfa[i])
 		}
 		cfg.StartServer(s)
@@ -147,7 +148,7 @@ func TestBasic(t *testing.T) {
 				ck.Move(i, gid3)
 				if cf.Shards[i] != gid3 {
 					cf1 := ck.Query(-1)
-					if cf1.Num <= cf.Num {
+					if cf1.Idx <= cf.Idx {
 						t.Fatalf("Move should increase Config.Num")
 					}
 				}
@@ -155,7 +156,7 @@ func TestBasic(t *testing.T) {
 				ck.Move(i, gid4)
 				if cf.Shards[i] != gid4 {
 					cf1 := ck.Query(-1)
-					if cf1.Num <= cf.Num {
+					if cf1.Idx <= cf.Idx {
 						t.Fatalf("Move should increase Config.Num")
 					}
 				}
@@ -183,7 +184,7 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("Test: Concurrent leave/join ...\n")
 
 	const npara = 10
-	var cka [npara]*Clerk
+	var cka [npara]*Client
 	for i := 0; i < len(cka); i++ {
 		cka[i] = cfg.makeClient(cfg.All())
 	}
@@ -309,7 +310,7 @@ func TestMulti(t *testing.T) {
 	fmt.Printf("Test: Concurrent multi leave/join ...\n")
 
 	const npara = 10
-	var cka [npara]*Clerk
+	var cka [npara]*Client
 	for i := 0; i < len(cka); i++ {
 		cka[i] = cfg.makeClient(cfg.All())
 	}

@@ -9,80 +9,68 @@ import (
 )
 
 type ShardCtrler struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-	dead    int32
-	lockName string
-	lockTime time.Time
-
-	// Your data here.
-	distros map[int]map[int]chan RaftResponse // distribution channels
-	clients map[string]int64                   // sequence number for each known client
-	configs []Config // indexed by config num
+	mu       sync.Mutex
+	me       int
+	rf       *raft.Raft
+	applyCh  chan raft.ApplyMsg
+	dead     int32
+	lockname string
+	locktime time.Time
+	sigChans  map[int]map[int]chan GeneralOutput
+	clientSeq  map[int64]int64
+	configs  []Config
 }
 
-type Op struct {
-	// Your data here.
-}
-
+// Join returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (sc *ShardCtrler) Join(args *JoinRequest, reply *JoinResponse) {
-	// Your code here.
-	req := RaftRequest{
-		OpType:  JOIN,
-		ClerkId: args.ClerkId,
-		Input:   args.Servers,
+	in := GeneralInput{
+		OpType:     JOIN,
+		ClientInfo: args.ClientInfo,
+		Input:      args.Servers,
 	}
-	resp := sc.tryApplyAndGetResult(req)
-	reply.RPCInfo = resp.RPCInfo
+	out := sc.tryApplyAndGetResult(in)
+	reply.RPCInfo = out.RPCInfo
 }
 
+// Leave returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (sc *ShardCtrler) Leave(args *LeaveRequest, reply *LeaveResponse) {
-	// Your code here.
-	req := RaftRequest{
-		OpType:  LEAVE,
-		ClerkId: args.ClerkId,
-		Input:   args.GIDs,
+	in := GeneralInput{
+		OpType:     LEAVE,
+		ClientInfo: args.ClientInfo,
+		Input:      args.GIDs,
 	}
-	resp := sc.tryApplyAndGetResult(req)
-	reply.RPCInfo = resp.RPCInfo
+	out := sc.tryApplyAndGetResult(in)
+	reply.RPCInfo = out.RPCInfo
 }
 
+// Move returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (sc *ShardCtrler) Move(args *MoveRequest, reply *MoveResponse) {
-	// Your code here.
-	req := RaftRequest{
-		OpType:  MOVE,
-		ClerkId: args.ClerkId,
-		Input:   args.Movable,
+	in := GeneralInput{
+		OpType:     MOVE,
+		ClientInfo: args.ClientInfo,
+		Input:      args.Movement,
 	}
-	resp := sc.tryApplyAndGetResult(req)
-	reply.RPCInfo = resp.RPCInfo
+	out := sc.tryApplyAndGetResult(in)
+	reply.RPCInfo = out.RPCInfo
 }
 
+// Move returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS
 func (sc *ShardCtrler) Query(args *QueryRequest, reply *QueryResponse) {
-	// Your code here.
-	req := RaftRequest{
-		OpType:  QUERY,
-		ClerkId: args.ClerkId,
-		Input:   args.Num,
+	in := GeneralInput{
+		OpType:     QUERY,
+		ClientInfo: args.ClientInfo,
+		Input:      args.Idx,
 	}
-	resp := sc.tryApplyAndGetResult(req)
-	if resp.RPCInfo != SUCCESS {
-		reply.RPCInfo = resp.RPCInfo
+	out := sc.tryApplyAndGetResult(in)
+	if out.RPCInfo != SUCCESS {
+		reply.RPCInfo = out.RPCInfo
 		return
 	}
-	src := resp.Output.(Config)
+	src := out.Output.(Config)
 	CopyConfig(&reply.Config, &src)
-	reply.RPCInfo = resp.RPCInfo
+	reply.RPCInfo = out.RPCInfo
 }
 
-//
-// servers[] contains the ports of the set of
-// servers that will cooperate via Raft to
-// form the fault-tolerant shardctrler service.
-// me is the index of the current server in servers[].
-//
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister) *ShardCtrler {
 	sc := new(ShardCtrler)
 	sc.me = me
@@ -93,10 +81,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
-	sc.clients = make(map[string]int64)
-	sc.distros = make(map[int]map[int]chan RaftResponse)
+	sc.clientSeq = make(map[int64]int64)
+	sc.sigChans = make(map[int]map[int]chan GeneralOutput)
 
 	go sc.executeLoop()
-
+	Debug("========" + SRV_FORMAT + "STARTED========", sc.me)
 	return sc
 }

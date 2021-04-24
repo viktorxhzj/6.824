@@ -4,58 +4,87 @@ import (
 	"fmt"
 	"time"
 
-	"6.824/raft"
+	"6.824/logger"
+)
+
+const (
+	LOG_INFO  = "[INFO]"
+	LOG_ERROR = "[ERROR]"
+	LOG_DEBUG = "[DEBUG]"
+)
+
+const (
+	CLI_FORMAT = "[KV-CLI %d] "
+	SRV_FORMAT = "[KV-SRV %d-%d] "
 )
 
 var (
-	EnableDebug   = 0
-	EnableConsole = 1
-	EnableFile    = 1
+	LogFile    = 0
+	LogConsole = 1
+	LogClient  = 1
+	LogServer  = 0
 )
 
-func (kv *ShardKV) Log(format string, info ...interface{}) {
-	if EnableDebug == 0 {
-		return
+func init() {
+	if LogFile == 1 {
+		logger.EnableLogger()
 	}
-	str := time.Now().Format("15:04:05.000")
-	str += fmt.Sprintf(" C:%d,STATE:%+v", kv.conf.Num, kv.shardState)
-	str += fmt.Sprintf("[GROUP %d NODE %d]  ", kv.gid, kv.me)
-	str += fmt.Sprintf(format, info...)
-	str += "\n"
-	write(str)
 }
 
-// 可不在临界区
-func (kv *ShardKV) Debug(format string, info ...interface{}) {
-	if EnableDebug == 0 {
-		return
-	}
-	str := time.Now().Format("15:04:05.000")
-	str += fmt.Sprintf("[GROUP %d NODE %d]  ", kv.gid, kv.me)
-	str += fmt.Sprintf(format, info...)
-	str += "\n"
-	write(str)
+func (c *Client) info(format string, info ...interface{}) {
+	c.log(LOG_INFO, format, info...)
 }
 
-func (ck *Clerk) Log(format string, info ...interface{}) {
-	if EnableDebug == 0 {
-		return
-	}
-	str := fmt.Sprintf("%v [%s]",
-		time.Now().Format("15:04:05.000"), ck.Uid)
-	str += fmt.Sprintf(format, info...)
-	str += "\n"
-	write(str)
+func (c *Client) error(format string, info ...interface{}) {
+	c.log(LOG_ERROR, format, info...)
 }
 
-func write(str string) {
-	if EnableFile == 1 {
-		_, err := raft.File.WriteString(str)
-		if err != nil {
-			panic("Failed to write")
+func (c *Client) log(prefix, format string, info ...interface{}) {
+	if LogClient == 1 {
+		msg := fmt.Sprintf("%s %v ", prefix, time.Now().Format("15:04:05.000"))
+		msg += fmt.Sprintf(CLI_FORMAT, c.Uid)
+		msg += fmt.Sprintf(format, info...)
+		msg += "\n"
+		if LogFile == 1 {
+			logger.Write(msg)
+		}
+		if LogConsole == 1 {
+			print(msg)
 		}
 	}
-	if EnableConsole == 1 {
-		print(str)
+}
+
+func (kv *ShardKV) info(format string, info ...interface{}) {
+	kv.log(LOG_INFO, format, info...)
+}
+
+func (kv *ShardKV) error(format string, info ...interface{}) {
+	kv.log(LOG_ERROR, format, info...)
+}
+
+func (kv *ShardKV) log(prefix, format string, info ...interface{}) {
+	if LogServer == 1 {
+		msg := fmt.Sprintf("%s %v %s ", prefix, time.Now().Format("15:04:05.000"), kv.conf.String())
+		msg += fmt.Sprintf(SRV_FORMAT, kv.gid, kv.me)
+		msg += fmt.Sprintf(format, info...)
+		msg += "\n"
+		if LogFile == 1 {
+			logger.Write(msg)
+		}
+		if LogConsole == 1 {
+			print(msg)
+		}
+	}
+}
+
+func Debug(format string, info ...interface{}) {
+	msg := fmt.Sprintf("%v", time.Now().Format("15:04:05.000"))
+	msg += fmt.Sprintf(format, info...)
+	msg += "\n"
+	if LogFile == 1 {
+		logger.Write(msg)
+	}
+	if LogConsole == 1 {
+		print(msg)
 	}
 }

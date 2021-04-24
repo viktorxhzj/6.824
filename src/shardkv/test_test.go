@@ -13,7 +13,7 @@ import "io/ioutil"
 
 const linearizabilityCheckTimeout = 1 * time.Second
 
-func check(t *testing.T, ck *Clerk, key string, value string) {
+func check(t *testing.T, ck *Client, key string, value string) {
 	v := ck.Get(key)
 	if v != value {
 		t.Fatalf("Get(%v): expected:\n%v\nreceived:\n%v", key, value, v)
@@ -406,7 +406,7 @@ func TestConcurrent2(t *testing.T) {
 	var done int32
 	ch := make(chan bool)
 
-	ff := func(i int, ck1 *Clerk) {
+	ff := func(i int, ck1 *Client) {
 		defer func() { ch <- true }()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(1)
@@ -475,7 +475,7 @@ func TestConcurrent3(t *testing.T) {
 	var done int32
 	ch := make(chan bool)
 
-	ff := func(i int, ck1 *Clerk) {
+	ff := func(i int, ck1 *Client) {
 		defer func() { ch <- true }()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(1)

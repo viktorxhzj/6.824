@@ -2,66 +2,47 @@ package shardctrler
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 )
 
-//
-// Shard controler: assigns shards to replication groups.
-//
-// RPC interface:
-// Join(servers) -- add a set of groups (gid -> server-list mapping).
-// Leave(gids) -- delete a set of groups.
-// Move(shard, gid) -- hand off one shard from current owner to gid.
-// Query(num) -> fetch Config # num, or latest config if num==-1.
-//
-// A Config (configuration) describes a set of replica groups, and the
-// replica group responsible for each shard. Configs are numbered. Config
-// #0 is the initial configuration, with no groups and all shards
-// assigned to group 0 (the invalid group).
-//
-// You will need to add fields to the RPC argument structs.
-//
+const (
+	NShards = 10 // number of shards
+	INTERNAL_TIMEOUT = 500 * time.Millisecond // allowed duration for processing request
+	LOCK_TIMEOUT     = 200 * time.Millisecond // allowed duration inside a lock
+)
 
-// The number of shards.
-const NShards = 10
-
-// A configuration -- an assignment of shards to groups.
-// Please don't change this.
-type Config struct {
-	Num    int // config number
-	Shards [NShards]int
-	Groups map[int][]string // gid -> servers[]
-}
-
-const CLIENT_REQUEST_INTERVAL = 1400 * time.Millisecond
-const INTERNAL_MAX_DURATION = 500 * time.Millisecond
-
+// operation type
 const (
 	JOIN  = "Join"
 	LEAVE = "Leave"
 	MOVE  = "Move"
 	QUERY = "Query"
 	NIL   = "NIL"
-
-	SUCCESS           = "成功"
-	NETWORK_FAILURE   = "网络超时"
-	INTERNAL_TIMEOUT    = "内部超时"
-	WRONG_LEADER      = "错误领袖"
-	FAILED_REQUEST    = "失败重试"
-	DUPLICATE_REQUEST = "幂等拦截"
-
-	NO_OP_INTERVAL = 1000
 )
 
-type ClerkId struct {
-	Uid string
+// rpc information
+const (
+	SUCCESS           = "成功请求"
+	APPLY_TIMEOUT     = "请求超时"
+	WRONG_LEADER      = "错误领袖"
+	FAILED_REQUEST    = "失败请求"
+	DUPLICATE_REQUEST = "重复请求"
+)
+
+type Config struct {
+	Idx    int              // config index, start from 1
+	Shards [NShards]int     // shard allocation
+	Groups map[int][]string // server information
+}
+
+type ClientInfo struct {
+	Uid int64
 	Seq int64
 }
 
 type JoinRequest struct {
 	Servers map[int][]string // new GID -> servers mappings
-	ClerkId
+	ClientInfo
 }
 
 type JoinResponse struct {
@@ -70,21 +51,21 @@ type JoinResponse struct {
 
 type LeaveRequest struct {
 	GIDs []int
-	ClerkId
+	ClientInfo
 }
 
 type LeaveResponse struct {
 	RPCInfo string
 }
 
-type Movable struct {
+type Movement struct {
 	Shard int
 	GID   int
 }
 
 type MoveRequest struct {
-	Movable
-	ClerkId
+	Movement
+	ClientInfo
 }
 
 type MoveResponse struct {
@@ -92,8 +73,8 @@ type MoveResponse struct {
 }
 
 type QueryRequest struct {
-	Num int // desired config number
-	ClerkId
+	Idx int
+	ClientInfo
 }
 
 type QueryResponse struct {
@@ -101,34 +82,42 @@ type QueryResponse struct {
 	RPCInfo string
 }
 
-type RaftRequest struct {
+type GeneralInput struct {
 	OpType string
-	ClerkId
+	ClientInfo
 	Input interface{}
 }
 
-type RaftResponse struct {
+type GeneralOutput struct {
 	Output  interface{}
 	RPCInfo string
 }
 
 func (c Config) String() string {
 	var str string
-	for i, g := range c.Shards {
-		str += strconv.Itoa(g)
-		if i != NShards-1 {
-			str += "|"
+	var i int
+	for i < NShards {
+		gid := c.Shards[i]
+		l := i
+		for i < NShards && c.Shards[i] == gid {
+			i++
+		}
+		r := i - 1
+		if l == r {
+			str += fmt.Sprintf("%d:%d ", gid, l)
+		} else {
+			str += fmt.Sprintf("%d:%d-%d ", gid, l, r)
 		}
 	}
-	return fmt.Sprintf("CONF %d [%s]", c.Num, str)
+	return fmt.Sprintf("CONF %d [%s]", c.Idx, str[:len(str)-1])
 }
 
-func (c ClerkId) String() string {
-	return fmt.Sprintf("[%s SEQ-%d]", c.Uid, c.Seq)
+func (c ClientInfo) String() string {
+	return fmt.Sprintf("[CTRL-CLI %d SEQ-%d]", c.Uid, c.Seq)
 }
 
-func (r RaftRequest) String() string {
-	str := r.ClerkId.String()
+func (r GeneralInput) String() string {
+	str := r.ClientInfo.String()
 	switch v := r.Input.(type) {
 	// Query
 	case int:
@@ -147,7 +136,7 @@ func (r RaftRequest) String() string {
 		str += fmt.Sprintf("Leave %+v", v)
 
 	// Move
-	case Movable:
+	case Movement:
 		str += fmt.Sprintf("Move Shard %d to GID %d", v.Shard, v.GID)
 	}
 

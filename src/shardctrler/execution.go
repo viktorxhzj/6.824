@@ -3,9 +3,12 @@ package shardctrler
 import (
 	"container/heap"
 	"time"
+
+	"6.824/labgob"
+	"6.824/raft"
 )
 
-func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse) {
+func (sc *ShardCtrler) tryApplyAndGetResult(req GeneralInput) (resp GeneralOutput) {
 
 	idx, term, ok := sc.rf.Start(req)
 	if !ok {
@@ -14,10 +17,10 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse)
 	}
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	sc.lock("try apply")
-	ch := make(chan RaftResponse, 1)
-	if mm := sc.distros[idx]; mm == nil {
-		mm = make(map[int]chan RaftResponse)
-		sc.distros[idx] = mm
+	ch := make(chan GeneralOutput, 1)
+	if mm := sc.sigChans[idx]; mm == nil {
+		mm = make(map[int]chan GeneralOutput)
+		sc.sigChans[idx] = mm
 		mm[term] = ch
 	} else {
 		mm[term] = ch
@@ -25,25 +28,25 @@ func (sc *ShardCtrler) tryApplyAndGetResult(req RaftRequest) (resp RaftResponse)
 	sc.unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	t := time.NewTimer(INTERNAL_MAX_DURATION)
+	t := time.NewTimer(INTERNAL_TIMEOUT)
 	select {
 	case resp = <-ch:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		sc.removeDistro(idx, term)
+		sc.removeSigChan(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
 		return
 	case <-t.C:
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
-		sc.removeDistro(idx, term)
+		sc.removeSigChan(idx, term)
 		/*--------------------CRITICAL SECTION--------------------*/
-		resp.RPCInfo = INTERNAL_TIMEOUT
+		resp.RPCInfo = APPLY_TIMEOUT
 		return
 	}
 }
 
-func (sc *ShardCtrler) removeDistro(idx, term int) {
-	sc.lock("remove distro")
-	delete(sc.distros[idx], term)
+func (sc *ShardCtrler) removeSigChan(idx, term int) {
+	sc.lock("remove sigChan")
+	delete(sc.sigChans[idx], term)
 	sc.unlock()
 }
 
@@ -59,48 +62,51 @@ main:
 
 		// deal with snapshot
 		if msg.SnapshotValid {
-			panic("shard ctrler should not have snapshot")
+			sc.error("shard ctrler should not have snapshot")
+			sc.unlock()
+			continue main
 		}
 		// deal with commands
 		idx, term := msg.CommandIndex, msg.CommandTerm
-		r := msg.Command.(RaftRequest)
+		r := msg.Command.(GeneralInput)
+		sc.info("收到日志[%d|%d] %s", idx, term, r.OpType)
 
 		// 幂等性校验
-		seq := sc.clients[r.Uid]
+		seq := sc.clientSeq[r.Uid]
 		if r.OpType != QUERY && r.Seq <= seq {
-			if ch, ok := sc.distros[idx][term]; ok {
-				ch <- RaftResponse{RPCInfo: DUPLICATE_REQUEST}
-				delete(sc.distros[idx], term)
+			if ch, ok := sc.sigChans[idx][term]; ok {
+				ch <- GeneralOutput{RPCInfo: DUPLICATE_REQUEST}
+				delete(sc.sigChans[idx], term)
 			}
 			sc.unlock()
 			continue main
 		}
 
-		sc.clients[r.Uid] = r.Seq
+		sc.clientSeq[r.Uid] = r.Seq
 
 		switch r.OpType {
 		case JOIN:
 			servers := r.Input.(map[int][]string)
 			sc.joinGroups(servers)
-			if ch, ok := sc.distros[idx][term]; ok {
-				ch <- RaftResponse{RPCInfo: SUCCESS}
-				delete(sc.distros[idx], term)
+			if ch, ok := sc.sigChans[idx][term]; ok {
+				ch <- GeneralOutput{RPCInfo: SUCCESS}
+				delete(sc.sigChans[idx], term)
 			}
 
 		case LEAVE:
 			gids := r.Input.([]int)
 			sc.leaveGroups(gids)
-			if ch, ok := sc.distros[idx][term]; ok {
-				ch <- RaftResponse{RPCInfo: SUCCESS}
-				delete(sc.distros[idx], term)
+			if ch, ok := sc.sigChans[idx][term]; ok {
+				ch <- GeneralOutput{RPCInfo: SUCCESS}
+				delete(sc.sigChans[idx], term)
 			}
 
 		case MOVE:
-			movable := r.Input.(Movable)
+			movable := r.Input.(Movement)
 			sc.moveOneShard(movable)
-			if ch, ok := sc.distros[idx][term]; ok {
-				ch <- RaftResponse{RPCInfo: SUCCESS}
-				delete(sc.distros[idx], term)
+			if ch, ok := sc.sigChans[idx][term]; ok {
+				ch <- GeneralOutput{RPCInfo: SUCCESS}
+				delete(sc.sigChans[idx], term)
 			}
 
 		case QUERY:
@@ -111,9 +117,9 @@ main:
 			} else {
 				config = sc.configs[len(sc.configs)-1]
 			}
-			if ch, ok := sc.distros[idx][term]; ok {
-				ch <- RaftResponse{RPCInfo: SUCCESS, Output: config}
-				delete(sc.distros[idx], term)
+			if ch, ok := sc.sigChans[idx][term]; ok {
+				ch <- GeneralOutput{RPCInfo: SUCCESS, Output: config}
+				delete(sc.sigChans[idx], term)
 			}
 		}
 		sc.unlock()
@@ -121,18 +127,10 @@ main:
 	}
 }
 
-// [0,9]
-// [0,4] [5,9]
-// [0,1] [2,4] [5,9]
-// [0,1] [2,4] [5,6] [7,9]
-// [0,1] [2]   [3,4] [5,6] [7,9]
-// [0,1] [2]   [3,4] [5,6] [7]   [8,9]
-// [0]   [1]   [2]   [3,4] [5,6] [7]   [8,9]
-
-func (sc *ShardCtrler) moveOneShard(m Movable) {
+func (sc *ShardCtrler) moveOneShard(m Movement) {
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num:    lastConfig.Num + 1,
+		Idx:    lastConfig.Idx + 1,
 		Groups: make(map[int][]string),
 	}
 	for g, srvs := range lastConfig.Groups {
@@ -145,18 +143,10 @@ func (sc *ShardCtrler) moveOneShard(m Movable) {
 	sc.configs = append(sc.configs, newConfig)
 }
 
-// 5 5
-// 3 3 4
-// 2 2 2 4
-// 2 2 2 2 2
 func (sc *ShardCtrler) joinGroups(servers map[int][]string) {
-	if len(sc.configs) == 0 {
-		panic("No init config")
-	}
-
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num:    lastConfig.Num + 1,
+		Idx:    lastConfig.Idx + 1,
 		Groups: make(map[int][]string),
 	}
 
@@ -169,19 +159,14 @@ func (sc *ShardCtrler) joinGroups(servers map[int][]string) {
 		newConfig.Groups[g] = srvs
 		heap.Push(&gids, g)
 	}
-
 	reallocSlots(&newConfig, &gids)
 	sc.configs = append(sc.configs, newConfig)
 }
 
 func (sc *ShardCtrler) leaveGroups(lgids []int) {
-	if len(sc.configs) == 0 {
-		panic("No init config")
-	}
-
 	lastConfig := sc.configs[len(sc.configs)-1]
 	newConfig := Config{
-		Num:    lastConfig.Num + 1,
+		Idx:    lastConfig.Idx + 1,
 		Groups: make(map[int][]string),
 	}
 
@@ -195,7 +180,6 @@ func (sc *ShardCtrler) leaveGroups(lgids []int) {
 	for g := range newConfig.Groups {
 		heap.Push(&gids, g)
 	}
-
 	reallocSlots(&newConfig, &gids)
 	sc.configs = append(sc.configs, newConfig)
 }
@@ -219,4 +203,30 @@ func reallocSlots(config *Config, gids *Heap) {
 			offset++
 		}
 	}
+}
+
+func init() {
+	labgob.Register(JoinRequest{})
+	labgob.Register(JoinResponse{})
+
+	labgob.Register(LeaveRequest{})
+	labgob.Register(LeaveResponse{})
+
+	labgob.Register(MoveRequest{})
+	labgob.Register(MoveResponse{})
+
+	labgob.Register(QueryRequest{})
+	labgob.Register(QueryResponse{})
+
+	labgob.Register(raft.AppendEntriesRequest{})
+	labgob.Register(raft.AppendEntriesResponse{})
+
+	labgob.Register(raft.RequestVoteRequest{})
+	labgob.Register(raft.RequestVoteResponse{})
+
+	labgob.Register(GeneralInput{})
+	labgob.Register(GeneralOutput{})
+
+	labgob.Register(map[int][]string{})
+	labgob.Register(Movement{})
 }
