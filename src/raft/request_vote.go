@@ -6,15 +6,17 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	defer rf.info("RequestVote RPC returns")
+	rf.info("RequestVote RPC receives %+v", *req)
 
 	resp.ResponseTerm = rf.currentTerm
 
 	// 1. Reply false if term < currentTerm (§5.1)
 	if req.CandidateTerm < rf.currentTerm {
-		Debug(rf, "reject VoteRequest from %d, my term is newer", req.CandidateId)
+		rf.info("reject VoteRequest from %d, my term is newer", req.CandidateId)
 
 		resp.Info = TERM_OUTDATED
-		rf.mu.Unlock()
 		return
 	}
 
@@ -37,30 +39,27 @@ func (rf *Raft) RequestVoteHandler(req *RequestVoteRequest, resp *RequestVoteRes
 
 	// if already voted, reject
 	if rf.votedFor != -1 && rf.votedFor != req.CandidateId {
-		Debug(rf, "reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
+		rf.info("reject VoteRequest from %d, already voted for %d", req.CandidateId, rf.votedFor)
 
 		resp.Info = VOTE_REJECTED
-		rf.mu.Unlock()
 		return
 	}
 
 	// if logger is not up-to-date, reject
 	if lastTerm > req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex > req.LastLogIndex) {
-		Debug(rf, "reject VoteRequest from %d, it isn't up to date", req.CandidateId)
+		rf.info("reject VoteRequest from %d, it isn't up to date", req.CandidateId)
 
 		resp.Info = VOTE_REJECTED
-		rf.mu.Unlock()
 		return
 	}
 
 	// if votedFor is null or candidateId, and candidate's logger is at least as up-to-date as receiver's logger, grant vote
-	Debug(rf, "vote for %d, our Term=%d", req.CandidateId, req.CandidateTerm)
+	rf.info("vote for %d, our Term=%d", req.CandidateId, req.CandidateTerm)
 	rf.votedFor = req.CandidateId
 	rf.persist()
 
 	resp.Info = VOTE_GRANTED
 	rf.resetTrigger()
-	rf.mu.Unlock()
 	/*-----------------------------------------*/
 }
 
@@ -93,9 +92,7 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 	rf.mu.Unlock()
 
 	// 发送RPC请求。当不OK时，说明网络异常。
-	if ok := rf.peers[server].Call("Raft.RequestVoteHandler", &req, &resp); !ok {
-		resp.Info = NETWORK_FAILURE
-	}
+	rf.peers[server].Call("Raft.RequestVoteHandler", &req, &resp)
 
 	/*+++++++++++++++++++++++++++++++++++++++++*/
 	rf.mu.Lock()
@@ -124,7 +121,7 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 			// 获选Leader
 			rf.role = LEADER
-			Debug(rf, "#####LEADER ELECTED! votes=%d, Term=%d#####", rf.votes, rf.currentTerm)
+			rf.info("========LEADER ELECTED! votes=%d, Term=%d========", rf.votes, rf.currentTerm)
 
 			// reinitialize volatile status after election
 			// 空日志返回索引0
@@ -147,7 +144,7 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 
 			rf.matchIndex[rf.me] = lastLogIndex
 
-			Debug(rf, "Upon election, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+			rf.info("Upon election, match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
 			// 结束定时器
 			rf.closeTrigger(st)
@@ -164,16 +161,16 @@ func (rf *Raft) sendRequestVote(server int, st int64) {
 		rf.currentTerm = resp.ResponseTerm
 		rf.role = FOLLOWER
 		rf.persist()
-		Debug(rf, "term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
+		rf.info("term is out of date and roll back, %d<%d", rf.currentTerm, resp.ResponseTerm)
 
 		// 结束定时器
 		rf.closeTrigger(st)
 
 	case VOTE_REJECTED:
-		Debug(rf, "VoteRequest to server %d is rejected", server)
+		rf.info("VoteRequest to server %d is rejected", server)
 
-	case NETWORK_FAILURE:
-		Debug(rf, "VoteRequest to server %d timeout", server)
+	default:
+		rf.info("VoteRequest to server %d timeout", server)
 	}
 	/*-----------------------------------------*/
 }

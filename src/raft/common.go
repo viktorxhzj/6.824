@@ -5,30 +5,31 @@ import (
 	"time"
 )
 
-type (
-	RPCInfo int
-	MsgType int
-)
-
+// timeout settings
 const (
 	TIMER_BASE         = 200
 	TIMER_RANGE        = 300
-	HEARTBEAT_INTERVAL = 100
+	HEARTBEAT_INTERVAL = 100 * time.Millisecond
 	APPLY_INTERVAL     = 100 * time.Millisecond
+)
 
+// raft role
+const (
 	FOLLOWER  = 0
 	CANDIDATE = 1
 	LEADER    = 2
+)
 
+// rpc information
+const (
 	// Common
-	TERM_OUTDATED   RPCInfo = 0
-	NETWORK_FAILURE RPCInfo = 1
+	TERM_OUTDATED = "任期过期"
 	// AppendEntries
-	SUCCESS          RPCInfo = 2
-	LOG_INCONSISTENT RPCInfo = 3
+	SUCCESS          = "成功请求"
+	LOG_INCONSISTENT = "日志异步"
 	// RequestVote
-	VOTE_GRANTED  RPCInfo = 4
-	VOTE_REJECTED RPCInfo = 5
+	VOTE_GRANTED  = "收到选票"
+	VOTE_REJECTED = "拒绝选票"
 )
 
 //
@@ -55,6 +56,15 @@ type ApplyMsg struct {
 	SnapshotIndex int
 }
 
+func (m ApplyMsg) String() string {
+	if m.CommandValid {
+		return fmt.Sprintf("COMMAND[%d|%d]", m.CommandIndex, m.CommandTerm)
+	} else if m.SnapshotValid {
+		return fmt.Sprintf("SNAPSHOT{...=>[%d|%d]}", m.SnapshotIndex, m.SnapshotTerm)
+	}
+	return ""
+}
+
 // RequestVoteRequest is a RequestVote RPC request structure.
 type RequestVoteRequest struct {
 	// Your data here (2A, 2B).
@@ -69,7 +79,7 @@ type RequestVoteResponse struct {
 	// Your data here (2A).
 	ResponseId   int
 	ResponseTerm int
-	Info         RPCInfo
+	Info         string
 }
 
 // AppendEntriesRequest is a AppendEntries RPC request structure.
@@ -97,7 +107,7 @@ type AppendEntriesResponse struct {
 	ResponseTerm  int
 	ConflictIndex int
 	ConflictTerm  int
-	Info          RPCInfo
+	Info          string
 }
 
 func (r AppendEntriesResponse) String() string {
@@ -133,5 +143,5 @@ type InstallSnapshotRequest struct {
 type InstallSnapshotResponse struct {
 	ResponseId   int
 	ResponseTerm int
-	Info         RPCInfo
+	Info         string
 }

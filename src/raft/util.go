@@ -67,6 +67,7 @@ func (rf *Raft) resetTrigger() {
 
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
+	Debug("========" + RAFT_FORMAT + "CRASHED========", rf.me)
 }
 
 func (rf *Raft) killed() bool {

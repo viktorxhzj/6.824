@@ -48,7 +48,7 @@ func (rf *Raft) leaderTryUpdateCommitIndex() {
 				}
 			}
 			if replicates > rf.size/2 {
-				Debug(rf, "UPDATE commitIdx = %d", n)
+				rf.info("UPDATE commitIdx = %d", n)
 				_ = rf.commitIndex
 				rf.commitIndex = n
 			}
@@ -82,7 +82,7 @@ func (rf *Raft) batchApply() {
 				CommandIndex: entry.Index,
 				CommandTerm:  entry.Term,
 			}
-			Debug(rf, "应用日志 [%d|%d]", msg.CommandIndex, msg.CommandTerm)
+			rf.info("应用日志 [%d|%d]", msg.CommandIndex, msg.CommandTerm)
 			rf.mu.Unlock()
 			rf.applyChan <- msg
 

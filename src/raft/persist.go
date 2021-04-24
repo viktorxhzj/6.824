@@ -19,9 +19,9 @@ func (rf *Raft) lastestSnapshot() Snapshot {
 	d := labgob.NewDecoder(r)
 	var s Snapshot
 	if err := d.Decode(&s); err != nil {
-		panic(err)
+		rf.error(err.Error())
 	}
-	Debug(rf, "读取最新快照 %+v", s)
+	rf.info("读取最新快照 %+v", s)
 	return s
 }
 
@@ -49,7 +49,6 @@ func (rf *Raft) makeSnapshotBytes(s Snapshot) []byte {
 	e.Encode(s)
 	return w.Bytes()
 }
-
 
 func (rf *Raft) makeRaftStateBytes() []byte {
 	w := new(bytes.Buffer)
@@ -82,7 +81,7 @@ func (rf *Raft) readPersist(data []byte) {
 		d.Decode(&offset) != nil ||
 		d.Decode(&lastIncludedIndex) != nil ||
 		d.Decode(&lastIncludedTerm) != nil {
-		panic("BAD PERSIST")
+		panic("bad deserialization")
 	} else {
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor

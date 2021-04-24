@@ -2,50 +2,76 @@ package raft
 
 import (
 	"fmt"
-	"os"
 	"time"
+
+	"6.824/logger"
+)
+
+const (
+	LOG_INFO  = "[INFO]"
+	LOG_ERROR = "[ERROR]"
+	LOG_DEBUG = "[DEBUG]"
+)
+
+const (
+	RAFT_FORMAT = "[RAFT %d] "
 )
 
 var (
-	File          *os.File
-	Prefix        = "../logs/"
-	Suffix        = ".logger"
-	EnableDebug   = 0
-	EnableConsole = 0
-	EnableFile    = 0
+	LogFile    = 0
+	LogConsole = 0
+	InDebug    = 1
 )
 
 func init() {
-	if EnableDebug == 1 {
-		filePath := Prefix + time.Now().Format("15:04:05.000") + Suffix
-		File, _ = os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if LogFile == 1 {
+		logger.EnableLogger()
 	}
 }
-func Debug(rf *Raft, format string, info ...interface{}) {
-	if EnableDebug == 0 {
-		return
-	}
-	str := fmt.Sprintf("%s A=%d,C=%d,T=%d,O=%d,{...=>[%d|%d]}",
-		time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.offset, rf.lastIncludedIndex, rf.lastIncludedTerm)
 
-	if len(rf.logs) == 0 {
-		str += "{}, "
-	} else {
-		str += fmt.Sprintf("{%+v->%+v}", rf.logs[0], rf.logs[len(rf.logs)-1])
-	}
-	str += fmt.Sprintf(" [NODE %d]", rf.me)
-	str += fmt.Sprintf(format, info...)
-	str += "\n"
-	write(str)
+func (rf *Raft) info(format string, info ...interface{}) {
+	rf.log(LOG_INFO, format, info...)
 }
-func write(str string) {
-	if EnableFile == 1 {
-		_, err := File.WriteString(str)
-		if err != nil {
-			panic("Failed to write")
+
+func (rf *Raft) error(format string, info ...interface{}) {
+	rf.log(LOG_ERROR, format, info...)
+	if InDebug == 1 {
+		panic(LOG_ERROR)
+	}
+}
+
+func (rf *Raft) log(prefix, format string, info ...interface{}) {
+	if LogFile == 1 || LogConsole == 1 {
+		msg := fmt.Sprintf("%s A=%d,C=%d,T=%d,O=%d,{...=>[%d|%d]}",
+			time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.offset, rf.lastIncludedIndex, rf.lastIncludedTerm)
+
+		if len(rf.logs) == 0 {
+			msg += "{} "
+		} else {
+			msg += fmt.Sprintf("{%+v->%+v} ", rf.logs[0], rf.logs[len(rf.logs)-1])
+		}
+		msg += fmt.Sprintf(RAFT_FORMAT, rf.me)
+		msg += fmt.Sprintf(format, info...)
+		msg += "\n"
+		if LogFile == 1 {
+			logger.Write(msg)
+		}
+		if LogConsole == 1 {
+			print(msg)
 		}
 	}
-	if EnableConsole == 1 {
-		print(str)
+}
+
+func Debug(format string, info ...interface{}) {
+	if LogFile == 1 || LogConsole == 1 {
+		msg := fmt.Sprintf("%s %v ", LOG_DEBUG, time.Now().Format("15:04:05.000"))
+		msg += fmt.Sprintf(format, info...)
+		msg += "\n"
+		if LogFile == 1 {
+			logger.Write(msg)
+		}
+		if LogConsole == 1 {
+			print(msg)
+		}
 	}
 }

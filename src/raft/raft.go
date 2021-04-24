@@ -85,6 +85,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.replicateLoop()
 	go rf.applyLoop()
 
+	Debug("========" + RAFT_FORMAT + "STARTED========", rf.me)
 	return rf
 }
 
@@ -118,7 +119,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	switch rf.role {
 	case LEADER:
-		Debug(rf, "### LEADER RECEIVES COMMAND ###")
 
 		if len(rf.logs) > 0 {
 			index = rf.logs[len(rf.logs)-1].Index + 1
@@ -138,10 +138,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 		rf.matchIndex[rf.me] = index
 		rf.nextIndex[rf.me] = index + 1
-		Debug(rf, "更新match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
+		rf.info("========LEADER RECEIVES COMMAND [%d|%d]========", index, term)
+		rf.info("更新match=%+v,next=%+v", rf.matchIndex, rf.nextIndex)
 
-		// non-blocking 
-		go func() {rf.appendChan <- 0}()
+		// non-blocking
+		go func() { rf.appendChan <- 0 }()
 	default:
 		// not a leader
 	}
@@ -190,7 +191,7 @@ func (rf *Raft) followerLoop() {
 		rf.mu.Lock()
 		switch {
 		case rf.trigger.Elapsed: // timer naturally elapses, turns to Candidate
-			Debug(rf, "Follower turns to Candidate, timeout=%+v", timeout)
+			rf.info("Follower turns to Candidate, timeout=%+v", timeout)
 			rf.role = CANDIDATE
 			rf.trigger = nil
 			rf.currentTerm++    // increment currentTerm
@@ -214,7 +215,7 @@ func (rf *Raft) candidateLoop() {
 
 		/*+++++++++++++++++++++++++++++++++++++++++*/
 		rf.mu.Lock()
-		Debug(rf, "start new election")
+		rf.info("start new election")
 		if rf.role != CANDIDATE {
 			rf.mu.Unlock()
 			return
@@ -283,7 +284,7 @@ func (rf *Raft) leaderLoop() {
 		}
 
 		// after sending heartbeats, sleep Leader for a while
-		sleeper := time.NewTimer(HEARTBEAT_INTERVAL * time.Millisecond)
+		sleeper := time.NewTimer(HEARTBEAT_INTERVAL)
 		<-sleeper.C
 	}
 }

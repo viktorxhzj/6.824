@@ -3,13 +3,13 @@ package raft
 func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *InstallSnapshotResponse) {
 
 	rf.mu.Lock()
-	Debug(rf, "收获快照RPC %+v", *req)
+	rf.info("InstallSnapshot RPC receives %+v", *req)
 
 	resp.ResponseTerm = rf.currentTerm
 
 	if req.LeaderTerm < rf.currentTerm {
 		resp.Info = TERM_OUTDATED
-		Debug(rf, "快照RPC对方任期过期，返回")
+		rf.info("InstallSnapshot RPC returns")
 		rf.mu.Unlock()
 		return
 	}
@@ -28,12 +28,11 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 	}
 
 	if rf.lastIncludedIndex >= req.LastIncludedIndex {
-		Debug(rf, "快照RPC过期，返回")
+		rf.info("InstallSnapshot RPC returns")
 		rf.mu.Unlock()
 		return
 	}
 
-	Debug(rf, "快照RPC向service发送信息")
 	msg := ApplyMsg{
 		CommandValid: false,
 		// For 2D:
@@ -42,9 +41,13 @@ func (rf *Raft) InstallSnapshotHandler(req *InstallSnapshotRequest, resp *Instal
 		SnapshotIndex: req.LastIncludedIndex,
 		SnapshotTerm:  req.LastIncludedTerm,
 	}
-	Debug(rf, "快照RPC结束")
+	rf.info("应用快照%s", msg.String())
 	rf.mu.Unlock()
 	rf.applyChan <- msg
+
+	rf.mu.Lock()
+	rf.info("InstallSnapshot RPC returns")
+	rf.mu.Unlock()
 }
 
 //
@@ -67,10 +70,10 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 
 	if sliIdx >= 0 && sliIdx < len(rf.logs)-1 {
 		rf.logs = rf.logs[sliIdx+1:]
-		Debug(rf, "快照没有覆盖所有日志")
+		rf.info("快照没有覆盖所有日志")
 	} else {
 		rf.logs = []LogEntry{}
-		Debug(rf, "全量快照")
+		rf.info("全量快照")
 	}
 	s := Snapshot{
 		LastIncludedIndex: lastIncludedIndex,
@@ -81,7 +84,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.persister.SaveStateAndSnapshot(state, snap)
 
 	rf.lastAppliedIndex = rf.lastIncludedIndex
-	Debug(rf, "Raft层快照更新完毕")
+	rf.info("Raft层快照更新完毕")
 	return true
 }
 
@@ -93,19 +96,19 @@ func (rf *Raft) Snapshot(index int, stateBytes []byte) {
 	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer Debug(rf, "%03d快照完毕", index)
-	Debug(rf, "%03d快照开始", index)
+	defer rf.info("%03d快照完毕", index)
+	rf.info("%03d快照开始", index)
 
 	// Index's position at the log
 	sliIdx := index - rf.offset
 
 	if sliIdx < 0 {
-		Debug(rf, "快照Index过期，无需快照")
+		rf.info("快照Index过期，无需快照")
 		return
 	}
 
 	if sliIdx >= len(rf.logs) {
-		panic("快照Index非法")
+		rf.error("非法快照Idx=%d", index)
 	}
 	rf.lastIncludedIndex = index
 	rf.lastIncludedTerm = rf.logs[sliIdx].Term

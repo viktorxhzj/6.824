@@ -7,9 +7,9 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer Debug(rf, "追加RPC返回")
+	defer rf.info("AppendEntries RPC returns")
 
-	Debug(rf, "追加RPC %+v", *req)
+	rf.info("AppendEntries RPC receives %+v", *req)
 	resp.ResponseTerm = rf.currentTerm
 
 	// 1. reply false if term < currentTerm (§5.1)
@@ -135,7 +135,7 @@ outer:
 		// if needs snapshot, send InstallSnapshot RPC first
 		// then retry AppendEntries RPC
 		if needSnapshot := (len(rf.logs) == 0) || (pos < -1); needSnapshot {
-			Debug(rf, "[NODE %d] 需要快照，因为next=%+v", server, rf.nextIndex)
+			rf.info(RAFT_FORMAT+"需要快照，因为next=%+v", server, rf.nextIndex)
 			var snapReq InstallSnapshotRequest
 			var snapResp InstallSnapshotResponse
 
@@ -145,9 +145,7 @@ outer:
 			rf.mu.Unlock()
 			/*--------------------CRITICAL SECTION--------------------*/
 
-			if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
-				snapResp.Info = NETWORK_FAILURE
-			}
+			rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp)
 
 			/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 			rf.mu.Lock()
@@ -164,23 +162,23 @@ outer:
 			// here we set the nextIndex in a pessimistic view
 			case SUCCESS:
 				rf.nextIndex[server] = rf.lastIncludedIndex + 1
-				Debug(rf, "快照RPC->[NODE %d]成功，更新next=%+v", server, rf.nextIndex)
+				rf.info("快照RPC->"+RAFT_FORMAT+"成功，更新next=%+v", server, rf.nextIndex)
 				rf.mu.Unlock()
 				continue outer
 
 			// term is out of date, steps down immediately
 			case TERM_OUTDATED:
-				Debug(rf, "快照RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 				rf.role = FOLLOWER
 				rf.currentTerm = snapResp.ResponseTerm
+				rf.info("快照RPC->"+RAFT_FORMAT+"返回TermOutdated，更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 				rf.persist()
 				rf.mu.Unlock()
 				return
 
 			// upon network_failure, retry AppendEntries RPC will still
 			// end up retrying InstallSnapshot RPC
-			case NETWORK_FAILURE:
-				Debug(rf, "快照RPC->[NODE %d]超时", server)
+			default:
+				rf.info("快照RPC->"+RAFT_FORMAT+"网络波动", server)
 				rf.mu.Unlock()
 				continue outer
 			}
@@ -203,14 +201,11 @@ outer:
 		req.LeaderId = rf.me
 		req.LeaderCommitIndex = rf.commitIndex
 
-		Debug(rf, "追加RPC-> [NODE %d] %+v", server, req)
+		rf.info("追加RPC->"+RAFT_FORMAT+"%+v", server, req)
 		rf.mu.Unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 
-
-		if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
-			resp.Info = NETWORK_FAILURE
-		}
+		rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp)
 
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		rf.mu.Lock()
@@ -231,30 +226,27 @@ outer:
 				rf.matchIndex[server] = n
 				rf.nextIndex[server] = rf.matchIndex[server] + 1
 			}
-			Debug(rf, "追加RPC->[NODE %d]成功,更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
+			rf.info("追加RPC->"+RAFT_FORMAT+"成功,更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
 			rf.leaderTryUpdateCommitIndex()
 			rf.mu.Unlock()
 			return
 
 		// term is out of date, steps down immediately
 		case TERM_OUTDATED:
-			Debug(rf, "追加RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 			rf.role = FOLLOWER
 			rf.currentTerm = resp.ResponseTerm
+			rf.info("追加RPC->"+RAFT_FORMAT+"返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 			rf.persist()
 			rf.mu.Unlock()
 			return
 
 		// we need to reduce PrevLogIndex to ultimately find the matching entry
 		case LOG_INCONSISTENT:
-			Debug(rf, "LogIncosistent, ConflictIdx=%d, ConflictTerm=%d", resp.ConflictIndex, resp.ConflictTerm)
-
 			if resp.ConflictIndex == 0 {
 				rf.nextIndex[server] = 1
 			}
 
 			idx := rf.searchRightIndex(resp.ConflictTerm)
-			Debug(rf, "LogIncosistent, next-idx=%d", idx)
 			// upon receiving a conflict response, the Leader should first search its log for conflictTerm
 			// if it finds an entry in its log with that term, it should set nextIndex to be the one
 			// beyond the index of the last entry in that term in its log
@@ -268,12 +260,12 @@ outer:
 			} else {
 				rf.nextIndex[server] = resp.ConflictIndex
 			}
-			Debug(rf, "追加RPC->[NODE %d]返回LogInconsistent，更新next=%+v", server, rf.nextIndex)
+			rf.info("追加RPC与"+RAFT_FORMAT+"日志不一致, ConflictIdx=%d, ConflictTerm=%d, 更新next=%+v", server, resp.ConflictIndex, resp.ConflictTerm, rf.nextIndex)
 			rf.mu.Unlock()
 
 		// upon network_failure, retry AppendEntries RPC
-		case NETWORK_FAILURE:
-			Debug(rf, "追加RPC->[NODE %d]超时, 重试", server)
+		default:
+			rf.info("追加RPC->"+RAFT_FORMAT+"网络波动", server)
 			rf.mu.Unlock()
 		}
 		/*--------------------CRITICAL SECTION--------------------*/
@@ -293,7 +285,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 	pos := prevLogIndex - rf.offset
 
 	if needSnapshot := pos < -1; needSnapshot {
-		Debug(rf, "[NODE %d] 需要快照", server)
+		rf.info(RAFT_FORMAT+"需要快照，因为next=%+v", server, rf.nextIndex)
 		var snapReq InstallSnapshotRequest
 		var snapResp InstallSnapshotResponse
 
@@ -303,9 +295,7 @@ func (rf *Raft) sendHeartBeat(server int) {
 		rf.mu.Unlock()
 		/*--------------------CRITICAL SECTION--------------------*/
 
-		if ok := rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp); !ok {
-			snapResp.Info = NETWORK_FAILURE
-		}
+		rf.peers[server].Call("Raft.InstallSnapshotHandler", &snapReq, &snapResp)
 
 		/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 		rf.mu.Lock()
@@ -322,23 +312,23 @@ func (rf *Raft) sendHeartBeat(server int) {
 		// here we set the nextIndex in a pessimistic view
 		case SUCCESS:
 			rf.nextIndex[server] = rf.lastIncludedIndex + 1
-			Debug(rf, "快照RPC->[NODE %d]成功，更新next=%+v", server, rf.nextIndex)
+			rf.info("快照RPC->"+RAFT_FORMAT+"成功，更新next=%+v", server, rf.nextIndex)
 			rf.mu.Unlock()
 			return
 
 		// term is out of date, steps down immediately
 		case TERM_OUTDATED:
-			Debug(rf, "快照RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 			rf.role = FOLLOWER
 			rf.currentTerm = snapResp.ResponseTerm
+			rf.info("快照RPC->"+RAFT_FORMAT+"返回TermOutdated，更新Term %d->%d", server, rf.currentTerm, snapResp.ResponseTerm)
 			rf.persist()
 			rf.mu.Unlock()
 			return
 
 		// upon network_failure, retry AppendEntries RPC will still
 		// end up retrying InstallSnapshot RPC
-		case NETWORK_FAILURE:
-			Debug(rf, "快照RPC->[NODE %d]超时", server)
+		default:
+			rf.info("快照RPC->"+RAFT_FORMAT+"网络波动", server)
 			rf.mu.Unlock()
 			return
 		}
@@ -360,13 +350,11 @@ func (rf *Raft) sendHeartBeat(server int) {
 	req.LeaderId = rf.me
 	req.LeaderCommitIndex = rf.commitIndex
 
-	Debug(rf, "心跳RPC-> [NODE %d] %+v", server, req)
+	rf.info("心跳RPC->"+RAFT_FORMAT+"%+v", server, req)
 	rf.mu.Unlock()
 	/*--------------------CRITICAL SECTION--------------------*/
 
-	if ok := rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp); !ok {
-		resp.Info = NETWORK_FAILURE
-	}
+	rf.peers[server].Call("Raft.AppendEntriesHandler", &req, &resp)
 
 	/*++++++++++++++++++++CRITICAL SECTION++++++++++++++++++++*/
 	rf.mu.Lock()
@@ -386,14 +374,13 @@ func (rf *Raft) sendHeartBeat(server int) {
 			rf.matchIndex[server] = req.PrevLogIndex + len(req.Entries)
 			rf.nextIndex[server] = rf.matchIndex[server] + 1
 		}
-
-		Debug(rf, "心跳RPC->[NODE %d]成功, 更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
+		rf.info("心跳RPC->"+RAFT_FORMAT+"成功,更新match=%+v,next=%+v", server, rf.matchIndex, rf.nextIndex)
 		rf.leaderTryUpdateCommitIndex()
 
 	case TERM_OUTDATED:
-		Debug(rf, "心跳RPC->[NODE %d]返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 		rf.currentTerm = resp.ResponseTerm
 		rf.role = FOLLOWER
+		rf.info("心跳RPC->"+RAFT_FORMAT+"返回TermOutdated, 更新Term %d->%d", server, rf.currentTerm, resp.ResponseTerm)
 		rf.persist()
 
 	case LOG_INCONSISTENT:
@@ -413,11 +400,10 @@ func (rf *Raft) sendHeartBeat(server int) {
 		} else {
 			rf.nextIndex[server] = resp.ConflictIndex
 		}
-		Debug(rf, "心跳RPC->[NODE %d]返回LogInconsistent，更新next=%+v", server, rf.nextIndex)
+		rf.info("心跳RPC与"+RAFT_FORMAT+"日志不一致, ConflictIdx=%d, ConflictTerm=%d, 更新next=%+v", server, resp.ConflictIndex, resp.ConflictTerm, rf.nextIndex)
 
-	case NETWORK_FAILURE:
-		Debug(rf, "心跳RPC->[NODE %d]超时", server)
-
+	default:
+		rf.info("追加RPC->"+RAFT_FORMAT+"网络波动", server)
 	}
 	/*-----------------------------------------*/
 }

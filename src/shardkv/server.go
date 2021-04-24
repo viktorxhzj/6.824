@@ -40,7 +40,9 @@ type ShardKV struct {
 // Get returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 	defer func() {
+		kv.lock("Get RPC returns")
 		kv.info("Get RPC returns, %+v", *reply)
+		kv.unlock()
 	}()
 
 	in := GeneralInput{
@@ -59,7 +61,9 @@ func (kv *ShardKV) Get(args *GetRequest, reply *GetResponse) {
 // PutAppend returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 	defer func() {
+		kv.lock("PutAppend RPC returns")
 		kv.info("PutAppend RPC returns, %+v", *reply)
+		kv.unlock()
 	}()
 
 	in := GeneralInput{
@@ -80,7 +84,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendRequest, reply *PutAppendResponse) {
 // ReceiveShard returns: APPLY_TIMEOUT/FAILED_REQUEST/SUCCESS/DUPLICATE_REQUEST
 func (kv *ShardKV) ReceiveShard(args *ReceiveShardRequest, reply *ReceiveShardResponse) {
 	defer func() {
+		kv.lock("ReceiveShard RPC returns")
 		kv.info("ReceiveShard RPC returns, %+v", *reply)
+		kv.unlock()
 	}()
 
 	in := GeneralInput{
