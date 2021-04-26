@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"fmt"
+	"time"
+)
+
 // AppendEntriesHandler receives AppendEntries RPC
 // Leader -> Follower/Candidate/Stale Leader
 func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
@@ -43,6 +48,7 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		resp.ConflictTerm = -1
 		return
 
+	// PrevLogIndex matches the lastIncludedIndex (no log)
 	case sliceIdx == -1 && req.PrevLogIndex == 0:
 
 	// PrevLogIndex matches the lastIncludedIndex in the snapshot
@@ -52,6 +58,19 @@ func (rf *Raft) AppendEntriesHandler(req *AppendEntriesRequest, resp *AppendEntr
 		resp.Info = LOG_INCONSISTENT
 		resp.ConflictIndex = 0
 		resp.ConflictTerm = -1
+		msg := fmt.Sprintf("%s A=%d,C=%d,T=%d,O=%d,{...=>[%d|%d]}",
+			time.Now().Format("15:04:05.000"), rf.lastAppliedIndex, rf.commitIndex, rf.currentTerm, rf.offset, rf.lastIncludedIndex, rf.lastIncludedTerm)
+
+		if len(rf.logs) == 0 {
+			msg += "{} "
+		} else {
+			msg += fmt.Sprintf("{%+v->%+v} ", rf.logs[0], rf.logs[len(rf.logs)-1])
+		}
+		msg += fmt.Sprintf(RAFT_FORMAT, rf.me)
+		msg += fmt.Sprintf("##### APPEND_ENTRIES REQ3%+v", *req)
+		msg += "\n"
+
+		fmt.Println(msg)
 		return
 
 	default:

@@ -19,7 +19,7 @@ const (
 
 var (
 	LogFile    = 0
-	LogConsole = 0
+	LogConsole = 1
 	InDebug    = 1
 )
 
